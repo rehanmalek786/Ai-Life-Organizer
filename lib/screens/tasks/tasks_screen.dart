@@ -128,7 +128,7 @@ class _TaskFormState extends State<_TaskForm> {
   late final _descCtrl = TextEditingController(text: widget.existing?.description ?? '');
   late final _categoryCtrl = TextEditingController(text: widget.existing?.category ?? 'General');
   late String _priority = widget.existing?.priority ?? 'medium';
-  DateTime? _deadline = widget.existing?.deadline;
+  late DateTime? _deadline = widget.existing?.deadline;
 
   Future<void> _pickDeadline() async {
     final date = await showDatePicker(
