@@ -26,6 +26,8 @@ jobs:
 
       - name: Generate the Android platform folder
         run: flutter create --platforms=android --org com.ailifeorganizer --project-name ai_life_organizer .
+      - name: Disable strict JVM target validation
+        run: echo "kotlin.jvm.target.validation.mode=warning" >> android/gradle.properties
 
       - name: Apply Android customizations (permissions + Firebase plugin)
         run: |
