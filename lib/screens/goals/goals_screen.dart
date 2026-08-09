@@ -95,7 +95,7 @@ class _GoalFormState extends State<_GoalForm> {
   late final _titleCtrl = TextEditingController(text: widget.existing?.title ?? '');
   late final _descCtrl = TextEditingController(text: widget.existing?.description ?? '');
   late double _progress = (widget.existing?.progress ?? 0).toDouble();
-  DateTime? _targetDate = widget.existing?.targetDate;
+  late DateTime? _targetDate = widget.existing?.targetDate;
 
   Future<void> _pickDate() async {
     final date = await showDatePicker(
