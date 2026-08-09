@@ -1,9 +1,9 @@
-
-// ---- Added for Firebase (AI Life Organizer) ----
-apply plugin: 'com.google.gms.google-services'
-
 android {
     defaultConfig {
-        minSdkVersion 23
+        minSdk = 23
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 }
