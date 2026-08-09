@@ -1,18 +1,9 @@
-// ---- Added for Firebase (AI Life Organizer) ----
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
+android {
+    defaultConfig {
+        minSdk = 23
     }
-    dependencies {
-        classpath("com.google.gms:google-services:4.4.2")
-    }
-}
-
-subprojects {
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
-        }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 }
