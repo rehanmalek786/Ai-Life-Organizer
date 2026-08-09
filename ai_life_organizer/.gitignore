@@ -1,0 +1,31 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+*.iml
+*.class
+
+# Android
+android/.gradle/
+android/captures/
+android/gradlew
+android/gradlew.bat
+android/local.properties
+android/**/GeneratedPluginRegistrant.java
+android/key.properties
+*.jks
+*.keystore
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Do NOT commit your real Gemini key or Firebase secrets anywhere else,
+# but google-services.json IS required in the repo for the build to work.

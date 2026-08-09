@@ -1,0 +1,48 @@
+name: ai_life_organizer
+description: "AI Life Organizer - a personal AI-powered life organizer app."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+
+  # Firebase (Auth + Database)
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.4.4
+
+  # State management
+  provider: ^6.1.2
+
+  # UI
+  table_calendar: ^3.1.2
+  google_fonts: ^6.2.1
+
+  # Reminders / notifications
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.9.4
+  flutter_timezone: ^3.0.1
+
+  # Secure storage for the AI API key
+  flutter_secure_storage: ^9.2.2
+
+  # AI (Gemini) networking
+  http: ^1.2.2
+
+  # Utilities
+  intl: ^0.19.0
+  uuid: ^4.5.1
+  shared_preferences: ^2.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
