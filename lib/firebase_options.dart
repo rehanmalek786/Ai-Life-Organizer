@@ -1,11 +1,6 @@
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 
-/// FILL THIS IN with your own Firebase project's values - see README.md
-/// "Step 2: Connect Firebase" for exactly where to find each one.
-/// The quickest way: open the google-services.json you downloaded from
-/// Firebase Console and copy the matching fields listed in the comments
-/// below into the strings here.
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
@@ -22,15 +17,10 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    // google-services.json -> client[0].api_key[0].current_key
-    apiKey: 'YOUR_ANDROID_API_KEY',
-    // google-services.json -> client[0].client_info.mobilesdk_app_id
-    appId: 'YOUR_ANDROID_APP_ID',
-    // google-services.json -> project_info.project_number
-    messagingSenderId: 'YOUR_SENDER_ID',
-    // google-services.json -> project_info.project_id
-    projectId: 'YOUR_PROJECT_ID',
-    // google-services.json -> project_info.storage_bucket
-    storageBucket: 'YOUR_PROJECT_ID.appspot.com',
+    apiKey: 'AIzaSyAxGnZgJyPJw9v7nc54t3MX__Ifs7u65Dg',
+    appId: '1:725370601201:android:2cbe004f1cc6bb5be57350',
+    messagingSenderId: '725370601201',
+    projectId: 'ai-life-organizer-5f0ab',
+    storageBucket: 'ai-life-organizer-5f0ab.firebasestorage.app',
   );
 }
