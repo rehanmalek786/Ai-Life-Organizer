@@ -103,7 +103,7 @@ $memoryText
       final body = jsonDecode(response.body);
       final candidates = body['candidates'] as List?;
       final text = candidates != null && candidates.isNotEmpty
-          ? candidates[0]['content']?['parts']?[0]?['text'] as String?
+      ? (candidates[0]['content']?['parts']?[0]?['text'] as String?)
           : null;
 
       if (text == null || text.trim().isEmpty) {
