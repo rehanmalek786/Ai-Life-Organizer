@@ -80,6 +80,11 @@ class _ReminderFormState extends State<_ReminderForm> {
   late final _titleCtrl = TextEditingController(text: widget.existing?.title ?? '');
   late DateTime _dateTime = widget.existing?.dateTime ?? DateTime.now().add(const Duration(hours: 1));
   late String _recurring = widget.existing?.recurring ?? 'none';
+  late String _sound = widget.existing?.sound ?? 'alarm';
+
+  void _previewSound() {
+    widget.notif.showNow(id: 888888, title: 'Preview', body: 'This is how "$_sound" will sound.');
+  }
 
   Future<void> _pickDateTime() async {
     final date = await showDatePicker(
@@ -103,6 +108,7 @@ class _ReminderFormState extends State<_ReminderForm> {
       title: _titleCtrl.text.trim(),
       dateTime: _dateTime,
       recurring: _recurring,
+      sound: _sound,
       notificationId: notificationId,
       createdAt: widget.existing?.createdAt ?? DateTime.now(),
     );
@@ -117,6 +123,7 @@ class _ReminderFormState extends State<_ReminderForm> {
       title: reminder.title,
       dateTime: reminder.dateTime,
       recurring: reminder.recurring,
+      sound: ReminderSoundLabel.fromName(reminder.sound),
     );
     if (mounted) Navigator.pop(context);
   }
@@ -153,6 +160,25 @@ class _ReminderFormState extends State<_ReminderForm> {
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(label: Text(r), selected: _recurring == r, onSelected: (_) => setState(() => _recurring = r)),
                     )),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text('Sound:'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ...['alarm', 'notification', 'ringtone'].map((s) => ChoiceChip(
+                      label: Text(s == 'alarm' ? 'Alarm (loud)' : s[0].toUpperCase() + s.substring(1)),
+                      selected: _sound == s,
+                      onSelected: (_) => setState(() => _sound = s),
+                    )),
+                ActionChip(
+                  avatar: const Icon(Icons.play_arrow, size: 16),
+                  label: const Text('Preview'),
+                  onPressed: _previewSound,
+                ),
               ],
             ),
             const SizedBox(height: 20),
