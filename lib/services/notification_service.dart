@@ -139,6 +139,7 @@ class NotificationService {
         scheduled,
         details,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: match,
       );
       return;
@@ -156,6 +157,7 @@ class NotificationService {
         scheduled,
         details,
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: match,
       );
     } catch (_) {
