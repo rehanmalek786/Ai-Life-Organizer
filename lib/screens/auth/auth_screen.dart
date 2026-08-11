@@ -53,6 +53,20 @@ class _AuthScreenState extends State<AuthScreen> {
     });
   }
 
+  Future<void> _skip() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final auth = context.read<AuthProvider>();
+    final result = await auth.signInAsGuest();
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _error = result;
+    });
+  }
+
   Future<void> _forgotPassword() async {
     if (_emailCtrl.text.trim().isEmpty) {
       setState(() => _error = 'Enter your email above first, then tap "Forgot password".');
@@ -136,6 +150,19 @@ class _AuthScreenState extends State<AuthScreen> {
                     _error = null;
                   }),
                   child: Text(_isLogin ? "Don't have an account? Sign up" : 'Already have an account? Log in'),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: const [
+                    Expanded(child: Divider()),
+                    Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('or')),
+                    Expanded(child: Divider()),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: _loading ? null : _skip,
+                  child: const Text('Skip for now, explore as guest'),
                 ),
                 const SizedBox(height: 20),
               ],
