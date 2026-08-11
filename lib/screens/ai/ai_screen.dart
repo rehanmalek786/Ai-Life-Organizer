@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../../services/ai_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/notification_service.dart';
@@ -22,16 +23,51 @@ class _AiScreenState extends State<AiScreen> {
   final List<ChatMessage> _messages = [];
   bool _sending = false;
 
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _speechAvailable = false;
+  bool _listening = false;
+
   @override
   void initState() {
     super.initState();
-    _messages.add(ChatMessage(role: 'model', text: "How can I help? Aap mujhse tasks, reminders, notes, ya goals ke baare mein natural language mein baat kar sakte hain."));
+    _messages.add(ChatMessage(role: 'model', text: "How can I help? You can talk to me about tasks, reminders, notes, goals, or expenses in plain language."));
+    _initSpeech();
+  }
+
+  Future<void> _initSpeech() async {
+    final available = await _speech.initialize();
+    if (mounted) setState(() => _speechAvailable = available);
+  }
+
+  Future<void> _toggleListening() async {
+    if (!_speechAvailable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Voice input is not available on this device (check microphone permission in phone Settings).')),
+      );
+      return;
+    }
+    if (_listening) {
+      await _speech.stop();
+      setState(() => _listening = false);
+      return;
+    }
+    setState(() => _listening = true);
+    await _speech.listen(
+      onResult: (result) {
+        setState(() => _inputCtrl.text = result.recognizedWords);
+        if (result.finalResult) {
+          setState(() => _listening = false);
+          if (result.recognizedWords.trim().isNotEmpty) _send();
+        }
+      },
+    );
   }
 
   @override
   void dispose() {
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
+    _speech.stop();
     super.dispose();
   }
 
@@ -104,10 +140,11 @@ class _AiScreenState extends State<AiScreen> {
           title: action.data['title']?.toString() ?? '',
           dateTime: dt,
           recurring: action.data['recurring']?.toString() ?? 'none',
+          sound: action.data['sound']?.toString() ?? 'alarm',
           notificationId: notifId,
           createdAt: DateTime.now(),
         ));
-        await _notif.scheduleReminder(id: notifId, title: action.data['title']?.toString() ?? '', dateTime: dt, recurring: action.data['recurring']?.toString() ?? 'none');
+        await _notif.scheduleReminder(id: notifId, title: action.data['title']?.toString() ?? '', dateTime: dt, recurring: action.data['recurring']?.toString() ?? 'none', sound: ReminderSoundLabel.fromName(action.data['sound']?.toString()));
         break;
       case 'create_event':
         await _fs.addEvent(CalendarEventItem(
@@ -142,6 +179,18 @@ class _AiScreenState extends State<AiScreen> {
           id: '',
           name: action.data['name']?.toString() ?? '',
           frequency: action.data['frequency']?.toString() ?? 'daily',
+          createdAt: DateTime.now(),
+        ));
+        break;
+      case 'create_transaction':
+        final amount = double.tryParse(action.data['amount']?.toString() ?? '') ?? 0;
+        await _fs.addTransaction(TransactionItem(
+          id: '',
+          type: action.data['type']?.toString() ?? 'expense',
+          amount: amount,
+          category: action.data['category']?.toString() ?? 'Other',
+          note: action.data['note']?.toString() ?? '',
+          date: DateTime.now(),
           createdAt: DateTime.now(),
         ));
         break;
@@ -209,10 +258,8 @@ class _AiScreenState extends State<AiScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.mic_none),
-                    onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Voice mode is coming in a future update.')),
-                    ),
+                    icon: Icon(_listening ? Icons.mic : Icons.mic_none, color: _listening ? theme.colorScheme.secondary : null),
+                    onPressed: _toggleListening,
                   ),
                   Expanded(
                     child: TextField(
