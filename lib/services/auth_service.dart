@@ -31,6 +31,34 @@ class AuthService {
 
   Future<void> signOut() => _auth.signOut();
 
+  Future<String?> signInAsGuest() async {
+    try {
+      await _auth.signInAnonymously();
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _friendlyError(e.code);
+    } catch (_) {
+      return 'Could not continue as guest. Please try again.';
+    }
+  }
+
+  /// Upgrades a guest (anonymous) account to a real email/password account,
+  /// keeping all the data that was created while browsing as a guest.
+  Future<String?> upgradeGuestAccount(String email, String password, String displayName) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null || !user.isAnonymous) return 'No guest session to upgrade.';
+      final credential = EmailAuthProvider.credential(email: email.trim(), password: password);
+      final result = await user.linkWithCredential(credential);
+      await result.user?.updateDisplayName(displayName.trim());
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _friendlyError(e.code);
+    } catch (_) {
+      return 'Something went wrong. Please try again.';
+    }
+  }
+
   Future<String?> sendPasswordReset(String email) async {
     try {
       await _auth.sendPasswordResetEmail(email: email.trim());
@@ -57,10 +85,8 @@ class AuthService {
         return 'Please enter a valid email address.';
       case 'network-request-failed':
         return 'Network error. Check your internet connection.';
-      case 'operation-not-allowed':
-        return 'Email/Password sign-in is not enabled for this project.';
       default:
-        return 'Something went wrong. Please try again.';
+        return 'Something went wrong ($code). Please try again.';
     }
   }
 }
