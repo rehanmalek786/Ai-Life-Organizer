@@ -18,11 +18,15 @@ class AuthProvider extends ChangeNotifier {
 
   User? get user => _user;
   bool get isSignedIn => _user != null;
+  bool get isGuest => _user?.isAnonymous ?? false;
   bool get ready => _ready;
 
   Future<String?> signIn(String email, String password) => _authService.signIn(email, password);
   Future<String?> signUp(String email, String password, String name) =>
       _authService.signUp(email, password, name);
+  Future<String?> signInAsGuest() => _authService.signInAsGuest();
+  Future<String?> upgradeGuestAccount(String email, String password, String name) =>
+      _authService.upgradeGuestAccount(email, password, name);
   Future<void> signOut() => _authService.signOut();
   Future<String?> resetPassword(String email) => _authService.sendPasswordReset(email);
 }
