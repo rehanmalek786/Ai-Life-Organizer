@@ -12,6 +12,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Unzip the project (if uploaded as a zip instead of individual files)
+        run: |
+          if [ -f ai_life_organizer.zip ]; then
+            unzip -o ai_life_organizer.zip -x "google-services.json"
+          fi
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -20,19 +26,55 @@ jobs:
       - name: Make sure google-services.json is present
         run: |
           if [ ! -f google-services.json ]; then
-            echo "::error::google-services.json not found at the repo root. Download it from Firebase Console (Project settings -> Your apps -> Android app) and commit it at the repo root before pushing."
+            echo "::error::google-services.json not found at the repo root. Download it from Firebase Console (Project settings -> Your apps -> Android app) and upload it to the repo root before pushing."
             exit 1
           fi
 
+      - name: Generate firebase_options.dart automatically from google-services.json
+        run: |
+          sudo apt-get install -y jq > /dev/null
+          API_KEY=$(jq -r '.client[0].api_key[0].current_key' google-services.json)
+          APP_ID=$(jq -r '.client[0].client_info.mobilesdk_app_id' google-services.json)
+          SENDER_ID=$(jq -r '.project_info.project_number' google-services.json)
+          PROJECT_ID=$(jq -r '.project_info.project_id' google-services.json)
+          STORAGE_BUCKET=$(jq -r '.project_info.storage_bucket' google-services.json)
+          mkdir -p lib
+          cat > lib/firebase_options.dart << EOF
+          import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
+          import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
+
+          class DefaultFirebaseOptions {
+            static FirebaseOptions get currentPlatform {
+              if (kIsWeb) {
+                throw UnsupportedError('This app is configured for Android only.');
+              }
+              switch (defaultTargetPlatform) {
+                case TargetPlatform.android:
+                  return android;
+                default:
+                  throw UnsupportedError('Only Android is configured in this project.');
+              }
+            }
+
+            static const FirebaseOptions android = FirebaseOptions(
+              apiKey: '$API_KEY',
+              appId: '$APP_ID',
+              messagingSenderId: '$SENDER_ID',
+              projectId: '$PROJECT_ID',
+              storageBucket: '$STORAGE_BUCKET',
+            );
+          }
+          EOF
+
       - name: Generate the Android platform folder
         run: flutter create --platforms=android --org com.ailifeorganizer --project-name ai_life_organizer .
-      - name: Disable strict JVM target validation
-        run: echo "kotlin.jvm.target.validation.mode=warning" >> android/gradle.properties
 
       - name: Apply Android customizations (permissions + Firebase plugin)
         run: |
           cp overrides/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
           cp google-services.json android/app/google-services.json
+          mkdir -p android/app/src/main/kotlin/com/ailifeorganizer/ai_life_organizer
+          cp overrides/MainActivity.kt android/app/src/main/kotlin/com/ailifeorganizer/ai_life_organizer/MainActivity.kt
 
           if [ -f android/build.gradle.kts ]; then
             cat overrides/root_append.gradle.kts >> android/build.gradle.kts
