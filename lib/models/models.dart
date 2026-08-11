@@ -157,6 +157,7 @@ class ReminderItem {
   final String title;
   final DateTime dateTime;
   final String recurring; // none | daily | weekly
+  final String sound; // alarm | notification | ringtone
   final int notificationId;
   final DateTime createdAt;
 
@@ -165,6 +166,7 @@ class ReminderItem {
     required this.title,
     required this.dateTime,
     this.recurring = 'none',
+    this.sound = 'alarm',
     required this.notificationId,
     required this.createdAt,
   });
@@ -174,6 +176,7 @@ class ReminderItem {
         title: m['title'] ?? '',
         dateTime: _toDate(m['dateTime']) ?? DateTime.now(),
         recurring: m['recurring'] ?? 'none',
+        sound: m['sound'] ?? 'alarm',
         notificationId: m['notificationId'] ?? 0,
         createdAt: _toDate(m['createdAt']) ?? DateTime.now(),
       );
@@ -182,6 +185,7 @@ class ReminderItem {
         'title': title,
         'dateTime': Timestamp.fromDate(dateTime),
         'recurring': recurring,
+        'sound': sound,
         'notificationId': notificationId,
         'createdAt': Timestamp.fromDate(createdAt),
       };
@@ -222,6 +226,80 @@ class CalendarEventItem {
         'endTime': endTime == null ? null : Timestamp.fromDate(endTime!),
         'location': location,
         'notes': notes,
+        'createdAt': Timestamp.fromDate(createdAt),
+      };
+}
+
+class TransactionItem {
+  final String id;
+  final String type; // income | expense
+  final double amount;
+  final String category;
+  final String note;
+  final DateTime date;
+  final DateTime createdAt;
+
+  TransactionItem({
+    required this.id,
+    required this.type,
+    required this.amount,
+    required this.category,
+    this.note = '',
+    required this.date,
+    required this.createdAt,
+  });
+
+  factory TransactionItem.fromMap(String id, Map<String, dynamic> m) => TransactionItem(
+        id: id,
+        type: m['type'] ?? 'expense',
+        amount: (m['amount'] ?? 0).toDouble(),
+        category: m['category'] ?? 'Other',
+        note: m['note'] ?? '',
+        date: _toDate(m['date']) ?? DateTime.now(),
+        createdAt: _toDate(m['createdAt']) ?? DateTime.now(),
+      );
+
+  Map<String, dynamic> toMap() => {
+        'type': type,
+        'amount': amount,
+        'category': category,
+        'note': note,
+        'date': Timestamp.fromDate(date),
+        'createdAt': Timestamp.fromDate(createdAt),
+      };
+}
+
+class LocationReminderItem {
+  final String id;
+  final String title;
+  final double latitude;
+  final double longitude;
+  final double radiusMeters;
+  final DateTime createdAt;
+
+  LocationReminderItem({
+    required this.id,
+    required this.title,
+    required this.latitude,
+    required this.longitude,
+    this.radiusMeters = 200,
+    required this.createdAt,
+  });
+
+  factory LocationReminderItem.fromMap(String id, Map<String, dynamic> m) => LocationReminderItem(
+        id: id,
+        title: m['title'] ?? '',
+        latitude: (m['latitude'] ?? 0).toDouble(),
+        longitude: (m['longitude'] ?? 0).toDouble(),
+        radiusMeters: (m['radiusMeters'] ?? 200).toDouble(),
+        createdAt: _toDate(m['createdAt']) ?? DateTime.now(),
+      );
+
+  Map<String, dynamic> toMap() => {
+        'title': title,
+        'latitude': latitude,
+        'longitude': longitude,
+        'radiusMeters': radiusMeters,
         'createdAt': Timestamp.fromDate(createdAt),
       };
 }
@@ -278,6 +356,8 @@ class ProposedAction {
         return 'Goal: ${data['title'] ?? ''}';
       case 'create_habit':
         return 'Habit: ${data['name'] ?? ''}';
+      case 'create_transaction':
+        return '${data['type'] == 'income' ? 'Income' : 'Expense'}: ${data['category'] ?? ''} — ${data['amount'] ?? ''}';
       case 'remember':
         return 'Remember: ${data['content'] ?? ''}';
       default:
