@@ -17,6 +17,20 @@ class FirestoreService {
   CollectionReference<Map<String, dynamic>> _col(String name) =>
       _db.collection('users').doc(_uid).collection(name);
 
+  // ---------- Onboarding ----------
+  Future<bool> isOnboardingComplete() async {
+    try {
+      final doc = await _db.collection('users').doc(_uid).get();
+      return doc.data()?['onboardingComplete'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> markOnboardingComplete() async {
+    await _db.collection('users').doc(_uid).set({'onboardingComplete': true}, SetOptions(merge: true));
+  }
+
   // ---------- Tasks ----------
   Stream<List<TaskItem>> tasksStream() => _col('tasks')
       .orderBy('createdAt', descending: true)
@@ -81,6 +95,29 @@ class FirestoreService {
   Future<void> updateEvent(CalendarEventItem e) => _col('events').doc(e.id).update(e.toMap());
   Future<void> deleteEvent(String id) => _col('events').doc(id).delete();
 
+  // ---------- Location-based Reminders ----------
+  Stream<List<LocationReminderItem>> locationRemindersStream() => _col('locationReminders')
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map((s) => s.docs.map((d) => LocationReminderItem.fromMap(d.id, d.data())).toList());
+
+  Future<List<LocationReminderItem>> locationRemindersOnce() async {
+    final snap = await _col('locationReminders').get();
+    return snap.docs.map((d) => LocationReminderItem.fromMap(d.id, d.data())).toList();
+  }
+
+  Future<void> addLocationReminder(LocationReminderItem r) => _col('locationReminders').add(r.toMap());
+  Future<void> deleteLocationReminder(String id) => _col('locationReminders').doc(id).delete();
+
+  // ---------- Money (Transactions) ----------
+  Stream<List<TransactionItem>> transactionsStream() => _col('transactions')
+      .orderBy('date', descending: true)
+      .snapshots()
+      .map((s) => s.docs.map((d) => TransactionItem.fromMap(d.id, d.data())).toList());
+
+  Future<void> addTransaction(TransactionItem t) => _col('transactions').add(t.toMap());
+  Future<void> deleteTransaction(String id) => _col('transactions').doc(id).delete();
+
   // ---------- Memories (things the AI has been told to remember) ----------
   Stream<List<MemoryItem>> memoriesStream() => _col('memories')
       .orderBy('createdAt', descending: true)
@@ -100,5 +137,72 @@ class FirestoreService {
   Future<int> countPending(String collection) async {
     final snap = await _col(collection).get();
     return snap.docs.length;
+  }
+
+  // ---------- One-time fetches (used by Universal Search) ----------
+  Future<List<TaskItem>> tasksOnce() async {
+    final snap = await _col('tasks').get();
+    return snap.docs.map((d) => TaskItem.fromMap(d.id, d.data())).toList();
+  }
+
+  Future<List<NoteItem>> notesOnce() async {
+    final snap = await _col('notes').get();
+    return snap.docs.map((d) => NoteItem.fromMap(d.id, d.data())).toList();
+  }
+
+  Future<List<GoalItem>> goalsOnce() async {
+    final snap = await _col('goals').get();
+    return snap.docs.map((d) => GoalItem.fromMap(d.id, d.data())).toList();
+  }
+
+  Future<List<HabitItem>> habitsOnce() async {
+    final snap = await _col('habits').get();
+    return snap.docs.map((d) => HabitItem.fromMap(d.id, d.data())).toList();
+  }
+
+  Future<List<CalendarEventItem>> eventsOnce() async {
+    final snap = await _col('events').get();
+    return snap.docs.map((d) => CalendarEventItem.fromMap(d.id, d.data())).toList();
+  }
+
+  Future<List<ReminderItem>> remindersOnce() async {
+    final snap = await _col('reminders').get();
+    return snap.docs.map((d) => ReminderItem.fromMap(d.id, d.data())).toList();
+  }
+
+  // ---------- Account deletion ----------
+  /// Deletes every document across every collection for the current user,
+  /// then the user's own root document. Used by "Delete my account" in
+  /// Settings, right before the Firebase Auth account itself is deleted.
+  Future<void> deleteAllUserData() async {
+    const collections = ['tasks', 'notes', 'goals', 'habits', 'reminders', 'events', 'memories', 'transactions'];
+    for (final name in collections) {
+      final snap = await _col(name).get();
+      for (final doc in snap.docs) {
+        await doc.reference.delete();
+      }
+    }
+    await _db.collection('users').doc(_uid).delete();
+  }
+
+  // ---------- Data export ----------
+  Future<Map<String, dynamic>> exportAllData() async {
+    final tasks = await tasksOnce();
+    final notes = await notesOnce();
+    final goals = await goalsOnce();
+    final habits = await habitsOnce();
+    final events = await eventsOnce();
+    final reminders = await remindersOnce();
+    final memories = await memoriesOnce();
+    return {
+      'exportedAt': DateTime.now().toIso8601String(),
+      'tasks': tasks.map((t) => {'title': t.title, 'priority': t.priority, 'category': t.category, 'completed': t.completed, 'deadline': t.deadline?.toIso8601String()}).toList(),
+      'notes': notes.map((n) => {'title': n.title, 'body': n.body, 'tags': n.tags}).toList(),
+      'goals': goals.map((g) => {'title': g.title, 'description': g.description, 'progress': g.progress}).toList(),
+      'habits': habits.map((h) => {'name': h.name, 'frequency': h.frequency, 'streak': h.streak}).toList(),
+      'events': events.map((e) => {'title': e.title, 'startTime': e.startTime.toIso8601String(), 'location': e.location}).toList(),
+      'reminders': reminders.map((r) => {'title': r.title, 'dateTime': r.dateTime.toIso8601String(), 'recurring': r.recurring}).toList(),
+      'memories': memories.map((m) => m.content).toList(),
+    };
   }
 }
