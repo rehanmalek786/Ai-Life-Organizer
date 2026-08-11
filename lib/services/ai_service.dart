@@ -124,4 +124,103 @@ $memoryText
       return AiResult(reply: 'Kuch gadbad hui. Internet connection check karein aur dobara try karein.');
     }
   }
+
+  /// Summarizes a note's body into a few short sentences. Returns a plain
+  /// string (no action) - used by the "Summarize" button in Notes.
+  Future<String> summarizeText({required String apiKey, required String text}) async {
+    if (apiKey.trim().isEmpty) {
+      return 'AI abhi set up nahi hai. Settings mein jaakar apni free Gemini API key add karein.';
+    }
+    if (text.trim().isEmpty) return '';
+
+    final prompt =
+        'Summarize the following note in 2-4 short sentences. Reply in the same '
+        'language/style as the note (English or Hinglish). Return ONLY the '
+        'summary text, no preamble, no markdown, no quotes.\n\nNote:\n$text';
+
+    try {
+      final response = await http.post(
+        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'role': 'user',
+              'parts': [
+                {'text': prompt}
+              ],
+            }
+          ],
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        return 'AI se connect nahi ho paaya (error ${response.statusCode}). Settings mein apni API key check karein.';
+      }
+
+      final body = jsonDecode(response.body);
+      final candidates = body['candidates'] as List?;
+      final text0 = candidates != null && candidates.isNotEmpty
+          ? (candidates[0]['content']?['parts']?[0]?['text'] as String?)
+          : null;
+
+      if (text0 == null || text0.trim().isEmpty) {
+        return 'Maaf kijiye, samajh nahi paya. Dobara try karein.';
+      }
+      return text0.trim();
+    } catch (_) {
+      return 'Kuch gadbad hui. Internet connection check karein aur dobara try karein.';
+    }
+  }
+
+  /// Extracts candidate action-item task titles from a note's body.
+  /// Returns an empty list if nothing looks like an action item, or if
+  /// the request fails for any reason - callers treat empty as "none found".
+  Future<List<String>> extractTasks({required String apiKey, required String text}) async {
+    if (apiKey.trim().isEmpty || text.trim().isEmpty) return [];
+
+    final prompt =
+        'Read the following note and extract any clear action items / to-dos '
+        'as short task titles. You MUST respond with ONLY a valid JSON array '
+        'of strings, no markdown fences, no extra commentary, e.g. '
+        '["Buy groceries", "Call the dentist"]. If there are no clear action '
+        'items, respond with exactly [].\n\nNote:\n$text';
+
+    try {
+      final response = await http.post(
+        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'role': 'user',
+              'parts': [
+                {'text': prompt}
+              ],
+            }
+          ],
+          'generationConfig': {
+            'responseMimeType': 'application/json',
+          },
+        }),
+      );
+
+      if (response.statusCode != 200) return [];
+
+      final body = jsonDecode(response.body);
+      final candidates = body['candidates'] as List?;
+      final text0 = candidates != null && candidates.isNotEmpty
+          ? (candidates[0]['content']?['parts']?[0]?['text'] as String?)
+          : null;
+      if (text0 == null || text0.trim().isEmpty) return [];
+
+      final parsed = jsonDecode(text0);
+      if (parsed is List) {
+        return parsed.map((e) => e.toString()).where((s) => s.trim().isNotEmpty).toList();
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
 }
