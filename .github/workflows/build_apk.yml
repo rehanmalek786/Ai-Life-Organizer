@@ -90,6 +90,9 @@ jobs:
             cat overrides/app_append.gradle >> android/app/build.gradle
           fi
 
+      - name: Force fresh dependency resolution (flutter create may have written a stale pubspec.lock)
+        run: rm -f pubspec.lock
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -101,3 +104,4 @@ jobs:
         with:
           name: app-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
