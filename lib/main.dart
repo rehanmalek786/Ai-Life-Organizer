@@ -3,8 +3,11 @@ import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'providers/app_providers.dart';
+import 'services/firestore_service.dart';
 import 'theme/app_theme.dart';
+import 'screens/splash/splash_screen.dart';
 import 'screens/auth/auth_screen.dart';
+import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/main_navigation.dart';
 import 'widgets/shared_widgets.dart';
 
@@ -32,7 +35,7 @@ class AppRoot extends StatelessWidget {
             theme: AppTheme.light,
             darkTheme: AppTheme.dark,
             themeMode: themeProvider.mode,
-            home: const _AuthGate(),
+            home: const SplashScreen(next: _AuthGate()),
           );
         },
       ),
@@ -40,15 +43,52 @@ class AppRoot extends StatelessWidget {
   }
 }
 
-class _AuthGate extends StatelessWidget {
+class _AuthGate extends StatefulWidget {
   const _AuthGate();
+  @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> {
+  bool? _onboardingComplete;
+  String? _checkedForUid;
+
+  Future<void> _checkOnboarding(String uid) async {
+    _checkedForUid = uid;
+    final complete = await FirestoreService().isOnboardingComplete();
+    if (mounted && _checkedForUid == uid) {
+      setState(() => _onboardingComplete = complete);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+
     if (!auth.ready) {
       return const Scaffold(body: LoadingView());
     }
-    return auth.isSignedIn ? const MainNavigation() : const AuthScreen();
+
+    if (!auth.isSignedIn) {
+      _checkedForUid = null;
+      _onboardingComplete = null;
+      return const AuthScreen();
+    }
+
+    final uid = auth.user!.uid;
+    if (_checkedForUid != uid) {
+      _checkOnboarding(uid);
+      return const Scaffold(body: LoadingView());
+    }
+
+    if (_onboardingComplete == false) {
+      return OnboardingScreen(onDone: () => setState(() => _onboardingComplete = true));
+    }
+
+    if (_onboardingComplete == null) {
+      return const Scaffold(body: LoadingView());
+    }
+
+    return const MainNavigation();
   }
 }
