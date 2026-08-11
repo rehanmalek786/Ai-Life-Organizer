@@ -8,6 +8,12 @@ import 'goals/goals_screen.dart';
 import 'habits/habits_screen.dart';
 import 'reminders/reminders_screen.dart';
 import 'settings/settings_screen.dart';
+import 'money/money_screen.dart';
+import 'analytics/analytics_screen.dart';
+import 'search/search_screen.dart';
+import 'location/location_reminders_screen.dart';
+import 'vault/vault_screen.dart';
+import '../services/location_service.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
@@ -15,8 +21,29 @@ class MainNavigation extends StatefulWidget {
   State<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState extends State<MainNavigation> {
+class _MainNavigationState extends State<MainNavigation> with WidgetsBindingObserver {
   int _index = 0;
+  final _locationService = LocationService();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _locationService.checkNow();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _locationService.checkNow();
+    }
+  }
 
   void _goTo(int i) => setState(() => _index = i);
 
@@ -53,10 +80,15 @@ class _MoreScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = [
+      (Icons.search, 'Search', const SearchScreen()),
       (Icons.sticky_note_2_outlined, 'Notes', const NotesScreen()),
       (Icons.flag_outlined, 'Goals', const GoalsScreen()),
       (Icons.repeat_rounded, 'Habits', const HabitsScreen()),
       (Icons.notifications_none, 'Reminders', const RemindersScreen()),
+      (Icons.account_balance_wallet_outlined, 'Money Organizer', const MoneyScreen()),
+      (Icons.bar_chart_rounded, 'Analytics', const AnalyticsScreen()),
+      (Icons.location_on_outlined, 'Location Reminders', const LocationRemindersScreen()),
+      (Icons.lock_outline, 'Personal Vault', const VaultScreen()),
       (Icons.settings_outlined, 'Settings', const SettingsScreen()),
     ];
     return Scaffold(
