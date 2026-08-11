@@ -1,9 +1,14 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../providers/app_providers.dart';
 import '../../services/firestore_service.dart';
+import '../../services/notification_service.dart';
 import '../../models/models.dart';
+import '../../theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -14,14 +19,22 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final _storage = const FlutterSecureStorage();
   final _fs = FirestoreService();
+  final _notif = NotificationService();
   final _keyCtrl = TextEditingController();
   bool _keySaved = false;
   bool _obscure = true;
+  bool? _exactAlarmsAllowed;
 
   @override
   void initState() {
     super.initState();
     _loadKey();
+    _checkExactAlarms();
+  }
+
+  Future<void> _checkExactAlarms() async {
+    final allowed = await _notif.canScheduleExact();
+    if (mounted) setState(() => _exactAlarmsAllowed = allowed);
   }
 
   Future<void> _loadKey() async {
@@ -38,6 +51,117 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('API key saved securely on this device.')));
     }
+  }
+
+  Future<void> _exportData() async {
+    final data = await _fs.exportAllData();
+    final jsonStr = const JsonEncoder.withIndent('  ').convert(data);
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Your data (JSON)'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: SingleChildScrollView(child: SelectableText(jsonStr, style: const TextStyle(fontSize: 12, fontFamily: 'monospace'))),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: jsonStr));
+              if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
+            },
+            child: const Text('Copy to clipboard'),
+          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteAccount() async {
+    final passwordCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete account?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('This permanently deletes all your data - tasks, notes, goals, habits, reminders, events, and memories. This cannot be undone.'),
+            const SizedBox(height: 16),
+            TextField(controller: passwordCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'Confirm your password')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete everything'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || user.email == null) return;
+      final cred = EmailAuthProvider.credential(email: user.email!, password: passwordCtrl.text);
+      await user.reauthenticateWithCredential(cred);
+      await _fs.deleteAllUserData();
+      await user.delete();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete account: incorrect password or network issue.')));
+      }
+    }
+  }
+
+  Future<void> _showUpgradeDialog(BuildContext context) async {
+    final nameCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final passwordCtrl = TextEditingController();
+    String? error;
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Create your account'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+                const SizedBox(height: 10),
+                TextField(controller: emailCtrl, decoration: const InputDecoration(labelText: 'Email')),
+                const SizedBox(height: 10),
+                TextField(controller: passwordCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'Password')),
+                if (error != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(error!, style: TextStyle(color: Theme.of(dialogContext).colorScheme.error))),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                final result = await context.read<AuthProvider>().upgradeGuestAccount(emailCtrl.text, passwordCtrl.text, nameCtrl.text);
+                if (result == null) {
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                } else {
+                  setDialogState(() => error = result);
+                }
+              },
+              child: const Text('Create account'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -124,10 +248,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
           const SizedBox(height: 28),
+          Text('Notifications', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(_exactAlarmsAllowed == true ? Icons.check_circle : Icons.error_outline,
+                          size: 18, color: _exactAlarmsAllowed == true ? AppColors.success : Theme.of(context).colorScheme.error),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _exactAlarmsAllowed == null
+                              ? 'Checking exact-alarm access...'
+                              : _exactAlarmsAllowed == true
+                                  ? 'Exact-time reminders are allowed'
+                                  : 'Exact-time reminders are not allowed yet',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_exactAlarmsAllowed == false) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: () async {
+                        await _notif.requestExactAlarmAccess();
+                        _checkExactAlarms();
+                      },
+                      child: const Text('Allow exact alarms'),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () => _notif.sendTestNotification(),
+                    icon: const Icon(Icons.notifications_active_outlined, size: 18),
+                    label: const Text('Send test notification'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (auth.isGuest) ...[
+            const SizedBox(height: 28),
+            Text('You are browsing as a guest', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text('Create an account to keep this data permanently and sign in on other devices.', style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () => _showUpgradeDialog(context),
+              icon: const Icon(Icons.person_add_alt),
+              label: const Text('Create account'),
+            ),
+          ],
+          const SizedBox(height: 28),
           OutlinedButton.icon(
             onPressed: () => auth.signOut(),
             icon: const Icon(Icons.logout),
             label: const Text('Log out'),
+          ),
+          const SizedBox(height: 28),
+          Text('Danger zone', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.error)),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(onPressed: _exportData, icon: const Icon(Icons.download), label: const Text('Export my data')),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error, side: BorderSide(color: Theme.of(context).colorScheme.error)),
+            onPressed: _deleteAccount,
+            icon: const Icon(Icons.delete_forever),
+            label: const Text('Delete my account'),
           ),
           const SizedBox(height: 40),
         ],
