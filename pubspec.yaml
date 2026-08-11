@@ -22,6 +22,16 @@ dependencies:
   # UI
   table_calendar: ^3.1.2
   google_fonts: ^6.2.1
+  fl_chart: ^0.69.0
+
+  # Voice mode
+  speech_to_text: ^7.0.0
+
+  # Location-based reminders
+  geolocator: ^13.0.1
+
+  # Encrypted vault (device authentication)
+  local_auth: ^2.3.0
 
   # Reminders / notifications
   flutter_local_notifications: ^18.0.1
