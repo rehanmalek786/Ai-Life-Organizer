@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../services/firestore_service.dart';
+import '../../services/ai_service.dart';
 import '../../models/models.dart';
 import '../../widgets/shared_widgets.dart';
 
@@ -97,6 +98,75 @@ class _NoteFormState extends State<_NoteForm> {
   late final _titleCtrl = TextEditingController(text: widget.existing?.title ?? '');
   late final _bodyCtrl = TextEditingController(text: widget.existing?.body ?? '');
   late final _tagsCtrl = TextEditingController(text: widget.existing?.tags.join(', ') ?? '');
+  final _ai = AiService();
+  final _storage = const FlutterSecureStorage();
+  bool _aiBusy = false;
+
+  Future<String> _apiKey() async => (await _storage.read(key: 'gemini_api_key')) ?? '';
+
+  Future<void> _summarize() async {
+    if (_bodyCtrl.text.trim().isEmpty) return;
+    setState(() => _aiBusy = true);
+    final summary = await _ai.summarizeText(apiKey: await _apiKey(), text: _bodyCtrl.text);
+    setState(() => _aiBusy = false);
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Summary'),
+        content: Text(summary),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  Future<void> _extractTasks() async {
+    if (_bodyCtrl.text.trim().isEmpty) return;
+    setState(() => _aiBusy = true);
+    final candidates = await _ai.extractTasks(apiKey: await _apiKey(), text: _bodyCtrl.text);
+    setState(() => _aiBusy = false);
+    if (!mounted) return;
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No clear action items found in this note.')));
+      return;
+    }
+    final selected = List<bool>.filled(candidates.length, true);
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Add as tasks?'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: candidates.length,
+              itemBuilder: (_, i) => CheckboxListTile(
+                value: selected[i],
+                onChanged: (v) => setDialogState(() => selected[i] = v ?? false),
+                title: Text(candidates[i]),
+                dense: true,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () {
+                for (var i = 0; i < candidates.length; i++) {
+                  if (selected[i]) {
+                    widget.fs.addTask(TaskItem(id: '', title: candidates[i], createdAt: DateTime.now()));
+                  }
+                }
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Add selected'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   void _save() {
     if (_titleCtrl.text.trim().isEmpty && _bodyCtrl.text.trim().isEmpty) return;
@@ -137,7 +207,28 @@ class _NoteFormState extends State<_NoteForm> {
             AppTextField(controller: _bodyCtrl, label: 'Note', maxLines: 6),
             const SizedBox(height: 12),
             AppTextField(controller: _tagsCtrl, label: 'Tags (comma separated)'),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _aiBusy ? null : _summarize,
+                    icon: const Icon(Icons.auto_awesome, size: 16),
+                    label: const Text('Summarize'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _aiBusy ? null : _extractTasks,
+                    icon: const Icon(Icons.checklist, size: 16),
+                    label: const Text('Extract tasks'),
+                  ),
+                ),
+              ],
+            ),
+            if (_aiBusy) const Padding(padding: EdgeInsets.only(top: 10), child: LinearProgressIndicator()),
+            const SizedBox(height: 16),
             ElevatedButton(onPressed: _save, child: const Text('Save')),
           ],
         ),
