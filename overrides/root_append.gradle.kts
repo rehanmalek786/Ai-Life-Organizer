@@ -1,4 +1,3 @@
-
 // ---- Added for Firebase (AI Life Organizer) ----
 buildscript {
     repositories {
@@ -9,17 +8,3 @@ buildscript {
         classpath("com.google.gms:google-services:4.4.2")
     }
 }
-
-// ---- Force every module (including plugins like flutter_timezone) to
-// compile Kotlin against Java 11, matching the Java compiler target, so
-// they don't conflict ("Inconsistent JVM Target Compatibility") ----
-subprojects {
-    afterEvaluate {
-        tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-            kotlinOptions {
-                jvmTarget = "11"
-            }
-        }
-    }
-}
-
