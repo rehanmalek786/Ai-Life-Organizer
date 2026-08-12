@@ -113,7 +113,10 @@ class NotificationService {
     );
   }
 
-  Future<void> scheduleReminder({
+  /// Returns true if the reminder was scheduled (exactly or as a fallback),
+  /// false if scheduling failed outright - so the screen can show the user
+  /// a visible warning instead of the reminder silently never firing.
+  Future<bool> scheduleReminder({
     required int id,
     required String title,
     required DateTime dateTime,
@@ -121,7 +124,7 @@ class NotificationService {
     ReminderSound sound = ReminderSound.alarm,
   }) async {
     await init();
-    if (dateTime.isBefore(DateTime.now())) return;
+    if (dateTime.isBefore(DateTime.now())) return false;
     // Convert the local wall-clock time the user picked into the equivalent
     // UTC instant (Dart's toUtc() uses the device's own OS timezone data,
     // no plugin needed), then schedule against the UTC location.
@@ -143,8 +146,8 @@ class NotificationService {
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: match,
       );
-      return;
-    } catch (_) {
+      return true;
+    } catch (e) {
       // Exact alarms need a permission that isn't granted on this device -
       // fall back to inexact so the reminder still fires (within a short
       // window) instead of silently never firing at all.
@@ -161,10 +164,11 @@ class NotificationService {
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: match,
       );
-    } catch (_) {
-      // If even this fails, there's nothing more we can silently do - the
-      // Settings > Notifications > "Send test notification" button is the
-      // way to confirm whether notifications work at all on this device.
+      return true;
+    } catch (e) {
+      // Both attempts failed - the caller should tell the user visibly
+      // rather than let the reminder silently vanish.
+      return false;
     }
   }
 
