@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest_all.dart' as tzdata;
-import 'package:flutter_timezone/flutter_timezone.dart';
 
 /// Which system sound category a reminder should ring with. These map to
 /// Android's own system default sounds (whatever the user already has set
@@ -38,12 +37,11 @@ class NotificationService {
   Future<void> init() async {
     if (_initialized) return;
     tzdata.initializeTimeZones();
-    try {
-      final String localTz = await FlutterTimezone.getLocalTimezone();
-      tz.setLocalLocation(tz.getLocation(localTz));
-    } catch (_) {
-      tz.setLocalLocation(tz.getLocation('UTC'));
-    }
+    // Reminder times are converted to UTC before scheduling (see
+    // scheduleReminder), so the reference location here is just UTC -
+    // this avoids needing a native plugin to look up the device's named
+    // timezone, which is what was breaking the Android build.
+    tz.setLocalLocation(tz.UTC);
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: androidInit);
@@ -124,7 +122,10 @@ class NotificationService {
   }) async {
     await init();
     if (dateTime.isBefore(DateTime.now())) return;
-    final scheduled = tz.TZDateTime.from(dateTime, tz.local);
+    // Convert the local wall-clock time the user picked into the equivalent
+    // UTC instant (Dart's toUtc() uses the device's own OS timezone data,
+    // no plugin needed), then schedule against the UTC location.
+    final scheduled = tz.TZDateTime.from(dateTime.toUtc(), tz.UTC);
     final details = NotificationDetails(android: _reminderDetails(sound));
 
     DateTimeComponents? match;
