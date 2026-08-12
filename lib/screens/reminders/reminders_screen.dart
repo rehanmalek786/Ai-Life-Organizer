@@ -118,14 +118,21 @@ class _ReminderFormState extends State<_ReminderForm> {
     } else {
       await widget.fs.updateReminder(reminder);
     }
-    await widget.notif.scheduleReminder(
+    final scheduled = await widget.notif.scheduleReminder(
       id: notificationId,
       title: reminder.title,
       dateTime: reminder.dateTime,
       recurring: reminder.recurring,
       sound: ReminderSoundLabel.fromName(reminder.sound),
     );
-    if (mounted) Navigator.pop(context);
+    if (mounted) {
+      if (!scheduled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Saved, but the notification could not be scheduled on this device. Check Settings > Notifications.'), duration: Duration(seconds: 4)),
+        );
+      }
+      Navigator.pop(context);
+    }
   }
 
   @override
