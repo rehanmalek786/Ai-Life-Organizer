@@ -98,3 +98,23 @@ class AppTextField extends StatelessWidget {
     );
   }
 }
+
+/// A smoother fade+slide-up page transition, used instead of the default
+/// abrupt platform push for a more polished feel when opening a section.
+Route<T> smoothRoute<T>(Widget page) {
+  return PageRouteBuilder<T>(
+    pageBuilder: (context, animation, secondaryAnimation) => page,
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+      return FadeTransition(
+        opacity: curved,
+        child: SlideTransition(
+          position: Tween<Offset>(begin: const Offset(0, 0.035), end: Offset.zero).animate(curved),
+          child: child,
+        ),
+      );
+    },
+    transitionDuration: const Duration(milliseconds: 300),
+    reverseTransitionDuration: const Duration(milliseconds: 220),
+  );
+}
