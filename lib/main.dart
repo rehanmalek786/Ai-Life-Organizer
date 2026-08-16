@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
 import 'providers/app_providers.dart';
 import 'services/firestore_service.dart';
@@ -55,7 +56,33 @@ class _AuthGateState extends State<_AuthGate> {
 
   Future<void> _checkOnboarding(String uid) async {
     _checkedForUid = uid;
-    final complete = await FirestoreService().isOnboardingComplete();
+
+    // Check the on-device cache first - once onboarding is done, every
+    // future app launch skips the network round-trip entirely, which is
+    // what was making the app feel slow to open.
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getBool('onboarding_done_$uid');
+      if (cached == true) {
+        if (mounted && _checkedForUid == uid) setState(() => _onboardingComplete = true);
+        return;
+      }
+    } catch (_) {}
+
+    bool complete = false;
+    try {
+      complete = await FirestoreService().isOnboardingComplete().timeout(const Duration(seconds: 6));
+    } catch (_) {
+      complete = false;
+    }
+
+    if (complete) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('onboarding_done_$uid', true);
+      } catch (_) {}
+    }
+
     if (mounted && _checkedForUid == uid) {
       setState(() => _onboardingComplete = complete);
     }
