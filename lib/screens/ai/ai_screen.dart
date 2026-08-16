@@ -1,216 +1,463 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import '../../models/models.dart';
+import '../../services/ai_service.dart';
+import '../../services/firestore_service.dart';
+import '../../services/notification_service.dart';
+import '../../theme/app_theme.dart';
 
-class AiResult {
-  final String reply;
-  final Map<String, dynamic>? action;
-  AiResult({required this.reply, this.action});
+/// The chat screen for talking to the AI assistant. Every reply the model
+/// gives can optionally carry a [ProposedAction] - the AI never writes to
+/// Firestore directly, the user has to tap "Confirm" on the card first.
+class AiScreen extends StatefulWidget {
+  const AiScreen({super.key});
+  @override
+  State<AiScreen> createState() => _AiScreenState();
 }
 
-/// Talks to the Gemini API. The model is instructed to always answer in a
-/// fixed JSON shape: a short reply, plus an optional "action" describing
-/// something to create. The app NEVER lets the AI write to the database
-/// directly - the action is only ever a proposal the user must confirm
-/// (see ProposedAction in models.dart and how ai_screen.dart uses it).
-class AiService {
-  // Gemini's current default model as of mid-2026. If Google renames/retires
-  // this model later, update this one string.
-  static const String _model = 'gemini-3.6-flash';
+class _AiScreenState extends State<AiScreen> {
+  final _ai = AiService();
+  final _fs = FirestoreService();
+  final _notif = NotificationService();
+  final _storage = const FlutterSecureStorage();
+  final _speech = stt.SpeechToText();
 
-  /// Safely pulls the text reply out of a Gemini response body. Written as
-  /// plain step-by-step checks (no chained ?. mixed with "as" casts) so
-  /// there's no ambiguity for the compiler and no crash on an unexpected
-  /// response shape.
-  String? _extractText(dynamic body) {
+  final _inputCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+
+  final List<ChatMessage> _messages = [];
+  String? _apiKey;
+  bool _sending = false;
+  bool _speechAvailable = false;
+  bool _listening = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApiKey();
+    _initSpeech();
+  }
+
+  @override
+  void dispose() {
+    _inputCtrl.dispose();
+    _scrollCtrl.dispose();
+    if (_listening) _speech.stop();
+    super.dispose();
+  }
+
+  Future<void> _loadApiKey() async {
+    final key = await _storage.read(key: 'gemini_api_key');
+    if (mounted) setState(() => _apiKey = key);
+  }
+
+  Future<void> _initSpeech() async {
     try {
-      final candidates = body['candidates'];
-      if (candidates == null || candidates is! List || candidates.isEmpty) return null;
-      final content = candidates[0]['content'];
-      if (content == null) return null;
-      final parts = content['parts'];
-      if (parts == null || parts is! List || parts.isEmpty) return null;
-      final value = parts[0]['text'];
-      if (value is String) return value;
-      return null;
+      final available = await _speech.initialize();
+      if (mounted) setState(() => _speechAvailable = available);
     } catch (_) {
-      return null;
+      // Mic permission denied or unsupported - the text field still works.
     }
   }
 
-  Future<AiResult> send({
-    required String apiKey,
-    required String userMessage,
-    required List<Map<String, String>> history,
-    required List<String> memories,
-  }) async {
-    if (apiKey.trim().isEmpty) {
-      return AiResult(
-        reply: "AI Assistant is not set up yet. Go to Settings and add your free Gemini API key.",
-      );
+  Future<void> _toggleListen() async {
+    if (!_speechAvailable) return;
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      return;
     }
-
-    final now = DateTime.now().toIso8601String();
-    final memoryText = memories.isEmpty ? 'None yet.' : memories.map((m) => '- $m').join('\n');
-
-    final systemPrompt = '''
-You are the assistant inside "AI Life Organizer", a personal productivity app.
-Reply in English by default. If the user writes in Hindi or Hinglish (Hindi+English mix), you may reply in that same style instead. Keep it short and natural either way.
-
-You MUST respond with ONLY valid JSON, no markdown fences, no extra commentary, in exactly this shape:
-{"reply": "short natural reply to show the user", "action": null}
-
-or, when the user is clearly asking you to create or save something:
-{"reply": "short natural reply confirming what you understood", "action": {"type": "<one of: create_task, create_reminder, create_event, create_note, create_goal, create_habit, create_transaction, remember>", "data": { ... }}}
-
-Field shapes per action type:
-create_task: {"title": string, "description": string, "priority": "low"|"medium"|"high", "deadline": ISO8601 string or null, "category": string}
-create_reminder: {"title": string, "dateTime": ISO8601 string, "recurring": "none"|"daily"|"weekly"}
-create_event: {"title": string, "startTime": ISO8601 string, "endTime": ISO8601 string or null, "location": string}
-create_note: {"title": string, "body": string, "tags": [string]}
-create_goal: {"title": string, "description": string, "targetDate": ISO8601 string or null}
-create_habit: {"name": string, "frequency": "daily" or comma list like "mon,wed,fri"}
-create_transaction: {"type": "income"|"expense", "amount": number, "category": string, "note": string}
-remember: {"content": string}
-
-Rules:
-- Only include a non-null action when the user clearly wants something created or remembered. For questions or chit-chat, action must be null.
-- Resolve relative dates/times ("kal", "tomorrow", "5 baje", "next monday") into absolute ISO8601 datetimes using the current datetime given below.
-- Never invent facts about the user beyond what they said or what is listed below.
-- Current datetime: $now
-- Known things about the user:
-$memoryText
-''';
-
-    final contents = [
-      ...history.map((h) => {
-            'role': h['role'] == 'user' ? 'user' : 'model',
-            'parts': [
-              {'text': h['text']}
-            ],
-          }),
-      {
-        'role': 'user',
-        'parts': [
-          {'text': userMessage}
-        ],
+    setState(() => _listening = true);
+    await _speech.listen(
+      onResult: (result) {
+        setState(() => _inputCtrl.text = result.recognizedWords);
+        if (result.finalResult) setState(() => _listening = false);
       },
-    ];
+    );
+  }
 
-    final url = Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey');
-
-    try {
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'contents': contents,
-          'systemInstruction': {
-            'parts': [
-              {'text': systemPrompt}
-            ]
-          },
-          'generationConfig': {
-            'responseMimeType': 'application/json',
-          },
-        }),
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollCtrl.hasClients) return;
+      _scrollCtrl.animateTo(
+        _scrollCtrl.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
       );
+    });
+  }
 
-      if (response.statusCode != 200) {
-        if (response.statusCode == 429) {
-          return AiResult(
-            reply: "The AI is getting too many requests right now (rate limit on the free tier). Wait about a minute and try again.",
-          );
-        }
-        if (response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 403) {
-          return AiResult(
-            reply: 'Your API key looks invalid or restricted (error ${response.statusCode}). Check it in Settings, or generate a fresh one at aistudio.google.com/apikey.',
-          );
-        }
-        return AiResult(
-          reply: 'Could not connect to the AI (error ${response.statusCode}). Try again in a moment.',
-        );
-      }
+  Future<void> _send() async {
+    final text = _inputCtrl.text.trim();
+    if (text.isEmpty || _sending) return;
+    if (_listening) {
+      await _speech.stop();
+      _listening = false;
+    }
 
-      final body = jsonDecode(response.body);
-      final text = _extractText(body);
+    final history = _messages
+        .map((m) => {'role': m.role, 'text': m.text})
+        .toList(growable: false);
 
-      if (text == null || text.trim().isEmpty) {
-        return AiResult(reply: 'Sorry, I did not understand that. Please try again.');
-      }
+    setState(() {
+      _messages.add(ChatMessage(role: 'user', text: text));
+      _inputCtrl.clear();
+      _sending = true;
+    });
+    _scrollToBottom();
 
-      try {
-        final parsed = jsonDecode(text);
-        return AiResult(
-          reply: parsed['reply']?.toString() ?? text,
-          action: parsed['action'] as Map<String, dynamic>?,
-        );
-      } catch (_) {
-        // Model didn't return clean JSON this time - show the raw text, no action.
-        return AiResult(reply: text);
-      }
+    List<String> memories = const [];
+    try {
+      final items = await _fs.memoriesOnce();
+      memories = items.map((m) => m.content).toList();
     } catch (_) {
-      return AiResult(reply: 'Something went wrong. Check your internet connection and try again.');
+      // Not signed in yet or offline - the AI can still chat without memory context.
+    }
+
+    final result = await _ai.send(
+      apiKey: _apiKey ?? '',
+      userMessage: text,
+      history: history,
+      memories: memories,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _messages.add(ChatMessage(
+        role: 'model',
+        text: result.reply,
+        action: result.action == null
+            ? null
+            : ProposedAction(
+                type: result.action!['type']?.toString() ?? '',
+                data: Map<String, dynamic>.from(result.action!['data'] ?? {}),
+              ),
+      ));
+      _sending = false;
+    });
+    _scrollToBottom();
+  }
+
+  DateTime? _parseDate(dynamic v) {
+    if (v == null) return null;
+    try {
+      return DateTime.parse(v.toString());
+    } catch (_) {
+      return null;
     }
   }
 
-  /// Plain text in, plain text out - used for "Summarize this note".
-  Future<String> summarizeText({required String apiKey, required String text}) async {
-    if (apiKey.trim().isEmpty) return 'Add your Gemini API key in Settings first.';
-    final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey');
+  Future<void> _confirmAction(ChatMessage msg) async {
+    final action = msg.action;
+    if (action == null || action.resolved) return;
+    final data = action.data;
+    String? error;
+
     try {
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'contents': [
-            {
-              'role': 'user',
-              'parts': [
-                {'text': 'Summarize the following note in 2-3 short sentences, plain text only, no markdown:\n\n$text'}
-              ]
-            }
-          ],
-        }),
-      );
-      if (response.statusCode != 200) return 'Could not summarize (error ${response.statusCode}).';
-      final body = jsonDecode(response.body);
-      final result = _extractText(body);
-      return result?.trim() ?? 'Could not summarize this note.';
-    } catch (_) {
-      return 'Check your internet connection and try again.';
+      switch (action.type) {
+        case 'create_task':
+          await _fs.addTask(TaskItem(
+            id: '',
+            title: (data['title'] ?? '').toString(),
+            description: (data['description'] ?? '').toString(),
+            priority: (data['priority'] ?? 'medium').toString(),
+            category: (data['category'] ?? 'General').toString(),
+            deadline: _parseDate(data['deadline']),
+            createdAt: DateTime.now(),
+          ));
+          break;
+
+        case 'create_reminder':
+          final when = _parseDate(data['dateTime']);
+          if (when == null) {
+            error = "Could not work out the reminder's date/time.";
+            break;
+          }
+          final notificationId = NotificationService.idFromString(
+              DateTime.now().microsecondsSinceEpoch.toString());
+          final reminder = ReminderItem(
+            id: '',
+            title: (data['title'] ?? '').toString(),
+            dateTime: when,
+            recurring: (data['recurring'] ?? 'none').toString(),
+            notificationId: notificationId,
+            createdAt: DateTime.now(),
+          );
+          await _fs.addReminder(reminder);
+          final scheduled = await _notif.scheduleReminder(
+            id: notificationId,
+            title: reminder.title,
+            dateTime: reminder.dateTime,
+            recurring: reminder.recurring,
+          );
+          if (!scheduled) {
+            error = 'Reminder saved, but it could not be scheduled on this device.';
+          }
+          break;
+
+        case 'create_event':
+          final start = _parseDate(data['startTime']);
+          if (start == null) {
+            error = "Could not work out the event's start time.";
+            break;
+          }
+          await _fs.addEvent(CalendarEventItem(
+            id: '',
+            title: (data['title'] ?? '').toString(),
+            startTime: start,
+            endTime: _parseDate(data['endTime']),
+            location: (data['location'] ?? '').toString(),
+            createdAt: DateTime.now(),
+          ));
+          break;
+
+        case 'create_note':
+          await _fs.addNote(NoteItem(
+            id: '',
+            title: (data['title'] ?? '').toString(),
+            body: (data['body'] ?? '').toString(),
+            tags: List<String>.from(data['tags'] ?? const []),
+            createdAt: DateTime.now(),
+          ));
+          break;
+
+        case 'create_goal':
+          await _fs.addGoal(GoalItem(
+            id: '',
+            title: (data['title'] ?? '').toString(),
+            description: (data['description'] ?? '').toString(),
+            targetDate: _parseDate(data['targetDate']),
+            createdAt: DateTime.now(),
+          ));
+          break;
+
+        case 'create_habit':
+          await _fs.addHabit(HabitItem(
+            id: '',
+            name: (data['name'] ?? '').toString(),
+            frequency: (data['frequency'] ?? 'daily').toString(),
+            createdAt: DateTime.now(),
+          ));
+          break;
+
+        case 'create_transaction':
+          final amount = data['amount'];
+          await _fs.addTransaction(TransactionItem(
+            id: '',
+            type: (data['type'] ?? 'expense').toString(),
+            amount: amount is num ? amount.toDouble() : double.tryParse(amount.toString()) ?? 0,
+            category: (data['category'] ?? 'Other').toString(),
+            note: (data['note'] ?? '').toString(),
+            date: DateTime.now(),
+            createdAt: DateTime.now(),
+          ));
+          break;
+
+        case 'remember':
+          await _fs.addMemory((data['content'] ?? '').toString());
+          break;
+
+        default:
+          error = 'Unknown action type.';
+      }
+    } catch (e) {
+      error = 'Could not save that: $e';
+    }
+
+    if (!mounted) return;
+    setState(() => action.resolved = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error ?? 'Done - saved to ${_sectionFor(action.type)}.')),
+    );
+  }
+
+  String _sectionFor(String type) {
+    switch (type) {
+      case 'create_task':
+        return 'Tasks';
+      case 'create_reminder':
+        return 'Reminders';
+      case 'create_event':
+        return 'Calendar';
+      case 'create_note':
+        return 'Notes';
+      case 'create_goal':
+        return 'Goals';
+      case 'create_habit':
+        return 'Habits';
+      case 'create_transaction':
+        return 'Money';
+      case 'remember':
+        return 'Memory';
+      default:
+        return 'the app';
     }
   }
 
-  /// Extracts candidate action-item tasks from a note's text.
-  Future<List<String>> extractTasks({required String apiKey, required String text}) async {
-    if (apiKey.trim().isEmpty) return [];
-    final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey');
-    try {
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'contents': [
-            {
-              'role': 'user',
-              'parts': [
-                {'text': 'Extract any clear action items / to-dos from this note as a short JSON array of strings (just the array, nothing else, no markdown fences). If there are none, return []. Note:\n\n$text'}
-              ]
-            }
+  void _dismissAction(ChatMessage msg) {
+    setState(() => msg.action?.resolved = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final noKey = (_apiKey == null || _apiKey!.trim().isEmpty);
+    return Scaffold(
+      appBar: AppBar(title: const Text('AI Assistant')),
+      body: Column(
+        children: [
+          if (noKey)
+            Container(
+              width: double.infinity,
+              color: AppColors.accent.withValues(alpha: 0.12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Text(
+                'Add your free Gemini API key in Settings to start chatting.',
+                style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.w600),
+              ),
+            ),
+          Expanded(
+            child: _messages.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.auto_awesome_outlined,
+                              size: 56, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.4)),
+                          const SizedBox(height: 16),
+                          Text('Ask me anything', style: Theme.of(context).textTheme.titleMedium),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Try "remind me to call mom tomorrow at 6pm" or "add a task to pay rent".',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _scrollCtrl,
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                    itemCount: _messages.length,
+                    itemBuilder: (context, i) => _MessageBubble(
+                      message: _messages[i],
+                      onConfirm: () => _confirmAction(_messages[i]),
+                      onDismiss: () => _dismissAction(_messages[i]),
+                    ),
+                  ),
+          ),
+          if (_sending)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: SizedBox(
+                height: 18,
+                width: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+              child: Row(
+                children: [
+                  if (_speechAvailable)
+                    IconButton(
+                      icon: Icon(_listening ? Icons.mic : Icons.mic_none,
+                          color: _listening ? AppColors.accent : null),
+                      onPressed: _toggleListen,
+                    ),
+                  Expanded(
+                    child: TextField(
+                      controller: _inputCtrl,
+                      minLines: 1,
+                      maxLines: 4,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _send(),
+                      decoration: InputDecoration(
+                        hintText: _listening ? 'Listening...' : 'Message the assistant...',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton.filled(
+                    icon: const Icon(Icons.arrow_upward),
+                    onPressed: _sending ? null : _send,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  final ChatMessage message;
+  final VoidCallback onConfirm;
+  final VoidCallback onDismiss;
+  const _MessageBubble({required this.message, required this.onConfirm, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final isUser = message.role == 'user';
+    final theme = Theme.of(context);
+    final bubbleColor = isUser
+        ? AppColors.primary
+        : theme.colorScheme.surfaceContainerHighest;
+    final textColor = isUser ? Colors.white : theme.colorScheme.onSurface;
+
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(
+          crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: bubbleColor,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(message.text, style: TextStyle(color: textColor)),
+            ),
+            if (message.action != null && !message.action!.resolved)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Card(
+                  margin: EdgeInsets.zero,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(message.action!.summary, style: theme.textTheme.bodyMedium),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextButton(onPressed: onDismiss, child: const Text('Dismiss')),
+                            const SizedBox(width: 4),
+                            FilledButton(onPressed: onConfirm, child: const Text('Confirm')),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
-          'generationConfig': {'responseMimeType': 'application/json'},
-        }),
-      );
-      if (response.statusCode != 200) return [];
-      final body = jsonDecode(response.body);
-      final result = _extractText(body);
-      if (result == null) return [];
-      final parsed = jsonDecode(result);
-      if (parsed is List) return parsed.map((e) => e.toString()).toList();
-      return [];
-    } catch (_) {
-      return [];
-    }
+        ),
+      ),
+    );
   }
 }
