@@ -113,10 +113,7 @@ $memoryText
       }
 
       final body = jsonDecode(response.body);
-      final candidates = body['candidates'] as List?;
-      final text = candidates != null && candidates.isNotEmpty
-          ? candidates[0]['content']?['parts']?[0]?['text'] as String?
-          : null;
+      final text = _extractText(body);
 
       if (text == null || text.trim().isEmpty) {
         return AiResult(reply: 'Sorry, I did not understand that. Please try again.');
@@ -158,7 +155,7 @@ $memoryText
       );
       if (response.statusCode != 200) return 'Could not summarize (error ${response.statusCode}).';
       final body = jsonDecode(response.body);
-      final result = body['candidates']?[0]?['content']?['parts']?[0]?['text'] as String?;
+      final result = _extractText(body);
       return result?.trim() ?? 'Could not summarize this note.';
     } catch (_) {
       return 'Check your internet connection and try again.';
@@ -187,7 +184,7 @@ $memoryText
       );
       if (response.statusCode != 200) return [];
       final body = jsonDecode(response.body);
-      final result = body['candidates']?[0]?['content']?['parts']?[0]?['text'] as String?;
+      final result = _extractText(body);
       if (result == null) return [];
       final parsed = jsonDecode(result);
       if (parsed is List) return parsed.map((e) => e.toString()).toList();
@@ -195,5 +192,18 @@ $memoryText
     } catch (_) {
       return [];
     }
+  }
+
+  /// Safely pulls the text out of a Gemini response body, without chained
+  /// null-aware casts (candidates[0]['content']?['parts']?[0]?['text']),
+  /// which is fragile if any level of the JSON is missing or the wrong type.
+  String? _extractText(dynamic body) {
+    final candidates = body['candidates'] as List?;
+    if (candidates == null || candidates.isEmpty) return null;
+    final content = (candidates[0] as Map?)?['content'] as Map?;
+    final parts = content?['parts'] as List?;
+    if (parts == null || parts.isEmpty) return null;
+    final text = (parts[0] as Map?)?['text'];
+    return text is String ? text : null;
   }
 }
