@@ -1,327 +1,216 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
-import '../../services/ai_service.dart';
-import '../../services/firestore_service.dart';
-import '../../services/notification_service.dart';
-import '../../models/models.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
-class AiScreen extends StatefulWidget {
-  const AiScreen({super.key});
-  @override
-  State<AiScreen> createState() => _AiScreenState();
+class AiResult {
+  final String reply;
+  final Map<String, dynamic>? action;
+  AiResult({required this.reply, this.action});
 }
 
-class _AiScreenState extends State<AiScreen> {
-  final _ai = AiService();
-  final _fs = FirestoreService();
-  final _notif = NotificationService();
-  final _storage = const FlutterSecureStorage();
-  final _inputCtrl = TextEditingController();
-  final _scrollCtrl = ScrollController();
+/// Talks to the Gemini API. The model is instructed to always answer in a
+/// fixed JSON shape: a short reply, plus an optional "action" describing
+/// something to create. The app NEVER lets the AI write to the database
+/// directly - the action is only ever a proposal the user must confirm
+/// (see ProposedAction in models.dart and how ai_screen.dart uses it).
+class AiService {
+  // Gemini's current default model as of mid-2026. If Google renames/retires
+  // this model later, update this one string.
+  static const String _model = 'gemini-3.6-flash';
 
-  final List<ChatMessage> _messages = [];
-  bool _sending = false;
-
-  final stt.SpeechToText _speech = stt.SpeechToText();
-  bool _speechAvailable = false;
-  bool _listening = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _messages.add(ChatMessage(role: 'model', text: "How can I help? You can talk to me about tasks, reminders, notes, goals, or expenses in plain language."));
-    _initSpeech();
-  }
-
-  Future<void> _initSpeech() async {
-    final available = await _speech.initialize();
-    if (mounted) setState(() => _speechAvailable = available);
-  }
-
-  Future<void> _toggleListening() async {
-    if (!_speechAvailable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Voice input is not available on this device (check microphone permission in phone Settings).')),
-      );
-      return;
-    }
-    if (_listening) {
-      await _speech.stop();
-      setState(() => _listening = false);
-      return;
-    }
-    setState(() => _listening = true);
-    await _speech.listen(
-      onResult: (result) {
-        setState(() => _inputCtrl.text = result.recognizedWords);
-        if (result.finalResult) {
-          setState(() => _listening = false);
-          if (result.recognizedWords.trim().isNotEmpty) _send();
-        }
-      },
-    );
-  }
-
-  @override
-  void dispose() {
-    _inputCtrl.dispose();
-    _scrollCtrl.dispose();
-    _speech.stop();
-    super.dispose();
-  }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollCtrl.hasClients) {
-        _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
-      }
-    });
-  }
-
-  Future<void> _send() async {
-    final text = _inputCtrl.text.trim();
-    if (text.isEmpty || _sending) return;
-    _inputCtrl.clear();
-    setState(() {
-      _messages.add(ChatMessage(role: 'user', text: text));
-      _sending = true;
-    });
-    _scrollToBottom();
-
-    final apiKey = await _storage.read(key: 'gemini_api_key') ?? '';
-    final memories = (await _fs.memoriesOnce()).map((m) => m.content).toList();
-    final history = _messages
-        .where((m) => m.action == null)
-        .map((m) => {'role': m.role, 'text': m.text})
-        .toList();
-
-    final result = await _ai.send(apiKey: apiKey, userMessage: text, history: history, memories: memories);
-
-    if (!mounted) return;
-    setState(() {
-      _messages.add(ChatMessage(
-        role: 'model',
-        text: result.reply,
-        action: result.action != null ? ProposedAction(type: result.action!['type'] ?? '', data: Map<String, dynamic>.from(result.action!['data'] ?? {})) : null,
-      ));
-      _sending = false;
-    });
-    _scrollToBottom();
-  }
-
-  DateTime? _parseIso(dynamic v) {
-    if (v == null) return null;
+  /// Safely pulls the text reply out of a Gemini response body. Written as
+  /// plain step-by-step checks (no chained ?. mixed with "as" casts) so
+  /// there's no ambiguity for the compiler and no crash on an unexpected
+  /// response shape.
+  String? _extractText(dynamic body) {
     try {
-      return DateTime.parse(v.toString());
+      final candidates = body['candidates'];
+      if (candidates == null || candidates is! List || candidates.isEmpty) return null;
+      final content = candidates[0]['content'];
+      if (content == null) return null;
+      final parts = content['parts'];
+      if (parts == null || parts is! List || parts.isEmpty) return null;
+      final value = parts[0]['text'];
+      if (value is String) return value;
+      return null;
     } catch (_) {
       return null;
     }
   }
 
-  Future<void> _confirmAction(ProposedAction action) async {
-    switch (action.type) {
-      case 'create_task':
-        await _fs.addTask(TaskItem(
-          id: '',
-          title: action.data['title']?.toString() ?? '',
-          description: action.data['description']?.toString() ?? '',
-          priority: action.data['priority']?.toString() ?? 'medium',
-          category: action.data['category']?.toString() ?? 'General',
-          deadline: _parseIso(action.data['deadline']),
-          createdAt: DateTime.now(),
-        ));
-        break;
-      case 'create_reminder':
-        final dt = _parseIso(action.data['dateTime']) ?? DateTime.now().add(const Duration(hours: 1));
-        final notifId = NotificationService.idFromString(DateTime.now().microsecondsSinceEpoch.toString());
-        await _fs.addReminder(ReminderItem(
-          id: '',
-          title: action.data['title']?.toString() ?? '',
-          dateTime: dt,
-          recurring: action.data['recurring']?.toString() ?? 'none',
-          sound: action.data['sound']?.toString() ?? 'alarm',
-          notificationId: notifId,
-          createdAt: DateTime.now(),
-        ));
-        await _notif.scheduleReminder(id: notifId, title: action.data['title']?.toString() ?? '', dateTime: dt, recurring: action.data['recurring']?.toString() ?? 'none', sound: ReminderSoundLabel.fromName(action.data['sound']?.toString()));
-        break;
-      case 'create_event':
-        await _fs.addEvent(CalendarEventItem(
-          id: '',
-          title: action.data['title']?.toString() ?? '',
-          startTime: _parseIso(action.data['startTime']) ?? DateTime.now(),
-          endTime: _parseIso(action.data['endTime']),
-          location: action.data['location']?.toString() ?? '',
-          createdAt: DateTime.now(),
-        ));
-        break;
-      case 'create_note':
-        await _fs.addNote(NoteItem(
-          id: '',
-          title: action.data['title']?.toString() ?? '',
-          body: action.data['body']?.toString() ?? '',
-          tags: (action.data['tags'] as List?)?.map((e) => e.toString()).toList() ?? [],
-          createdAt: DateTime.now(),
-        ));
-        break;
-      case 'create_goal':
-        await _fs.addGoal(GoalItem(
-          id: '',
-          title: action.data['title']?.toString() ?? '',
-          description: action.data['description']?.toString() ?? '',
-          targetDate: _parseIso(action.data['targetDate']),
-          createdAt: DateTime.now(),
-        ));
-        break;
-      case 'create_habit':
-        await _fs.addHabit(HabitItem(
-          id: '',
-          name: action.data['name']?.toString() ?? '',
-          frequency: action.data['frequency']?.toString() ?? 'daily',
-          createdAt: DateTime.now(),
-        ));
-        break;
-      case 'create_transaction':
-        final amount = double.tryParse(action.data['amount']?.toString() ?? '') ?? 0;
-        await _fs.addTransaction(TransactionItem(
-          id: '',
-          type: action.data['type']?.toString() ?? 'expense',
-          amount: amount,
-          category: action.data['category']?.toString() ?? 'Other',
-          note: action.data['note']?.toString() ?? '',
-          date: DateTime.now(),
-          createdAt: DateTime.now(),
-        ));
-        break;
-      case 'remember':
-        await _fs.addMemory(action.data['content']?.toString() ?? '');
-        break;
-    }
-    setState(() => action.resolved = true);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Done ✓'), duration: Duration(seconds: 1)));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(title: const Text('AI Assistant')),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollCtrl,
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length + (_sending ? 1 : 0),
-              itemBuilder: (context, i) {
-                if (i >= _messages.length) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Align(alignment: Alignment.centerLeft, child: SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))),
-                  );
-                }
-                final m = _messages[i];
-                final isUser = m.role == 'user';
-                return Align(
-                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Column(
-                    crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-                        margin: const EdgeInsets.symmetric(vertical: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: isUser ? theme.colorScheme.primary : theme.cardTheme.color,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Text(m.text, style: TextStyle(color: isUser ? Colors.white : theme.textTheme.bodyLarge?.color)),
-                      ),
-                      if (m.action != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _ActionCard(action: m.action!, onConfirm: () => _confirmAction(m.action!)),
-                        ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: Icon(_listening ? Icons.mic : Icons.mic_none, color: _listening ? theme.colorScheme.secondary : null),
-                    onPressed: _toggleListening,
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: _inputCtrl,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _send(),
-                      decoration: const InputDecoration(hintText: 'Ask anything...'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(icon: const Icon(Icons.arrow_upward), onPressed: _sending ? null : _send),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionCard extends StatelessWidget {
-  final ProposedAction action;
-  final VoidCallback onConfirm;
-  const _ActionCard({required this.action, required this.onConfirm});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    if (action.resolved) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.primary.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.check_circle, size: 16, color: theme.colorScheme.primary),
-          const SizedBox(width: 6),
-          Text('Added', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.w600)),
-        ]),
+  Future<AiResult> send({
+    required String apiKey,
+    required String userMessage,
+    required List<Map<String, String>> history,
+    required List<String> memories,
+  }) async {
+    if (apiKey.trim().isEmpty) {
+      return AiResult(
+        reply: "AI Assistant is not set up yet. Go to Settings and add your free Gemini API key.",
       );
     }
-    return Container(
-      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.secondary.withValues(alpha: 0.4)),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(action.summary, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              ElevatedButton(onPressed: onConfirm, style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)), child: const Text('Confirm')),
+
+    final now = DateTime.now().toIso8601String();
+    final memoryText = memories.isEmpty ? 'None yet.' : memories.map((m) => '- $m').join('\n');
+
+    final systemPrompt = '''
+You are the assistant inside "AI Life Organizer", a personal productivity app.
+Reply in English by default. If the user writes in Hindi or Hinglish (Hindi+English mix), you may reply in that same style instead. Keep it short and natural either way.
+
+You MUST respond with ONLY valid JSON, no markdown fences, no extra commentary, in exactly this shape:
+{"reply": "short natural reply to show the user", "action": null}
+
+or, when the user is clearly asking you to create or save something:
+{"reply": "short natural reply confirming what you understood", "action": {"type": "<one of: create_task, create_reminder, create_event, create_note, create_goal, create_habit, create_transaction, remember>", "data": { ... }}}
+
+Field shapes per action type:
+create_task: {"title": string, "description": string, "priority": "low"|"medium"|"high", "deadline": ISO8601 string or null, "category": string}
+create_reminder: {"title": string, "dateTime": ISO8601 string, "recurring": "none"|"daily"|"weekly"}
+create_event: {"title": string, "startTime": ISO8601 string, "endTime": ISO8601 string or null, "location": string}
+create_note: {"title": string, "body": string, "tags": [string]}
+create_goal: {"title": string, "description": string, "targetDate": ISO8601 string or null}
+create_habit: {"name": string, "frequency": "daily" or comma list like "mon,wed,fri"}
+create_transaction: {"type": "income"|"expense", "amount": number, "category": string, "note": string}
+remember: {"content": string}
+
+Rules:
+- Only include a non-null action when the user clearly wants something created or remembered. For questions or chit-chat, action must be null.
+- Resolve relative dates/times ("kal", "tomorrow", "5 baje", "next monday") into absolute ISO8601 datetimes using the current datetime given below.
+- Never invent facts about the user beyond what they said or what is listed below.
+- Current datetime: $now
+- Known things about the user:
+$memoryText
+''';
+
+    final contents = [
+      ...history.map((h) => {
+            'role': h['role'] == 'user' ? 'user' : 'model',
+            'parts': [
+              {'text': h['text']}
             ],
-          ),
+          }),
+      {
+        'role': 'user',
+        'parts': [
+          {'text': userMessage}
         ],
-      ),
-    );
+      },
+    ];
+
+    final url = Uri.parse(
+        'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey');
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': contents,
+          'systemInstruction': {
+            'parts': [
+              {'text': systemPrompt}
+            ]
+          },
+          'generationConfig': {
+            'responseMimeType': 'application/json',
+          },
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        if (response.statusCode == 429) {
+          return AiResult(
+            reply: "The AI is getting too many requests right now (rate limit on the free tier). Wait about a minute and try again.",
+          );
+        }
+        if (response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 403) {
+          return AiResult(
+            reply: 'Your API key looks invalid or restricted (error ${response.statusCode}). Check it in Settings, or generate a fresh one at aistudio.google.com/apikey.',
+          );
+        }
+        return AiResult(
+          reply: 'Could not connect to the AI (error ${response.statusCode}). Try again in a moment.',
+        );
+      }
+
+      final body = jsonDecode(response.body);
+      final text = _extractText(body);
+
+      if (text == null || text.trim().isEmpty) {
+        return AiResult(reply: 'Sorry, I did not understand that. Please try again.');
+      }
+
+      try {
+        final parsed = jsonDecode(text);
+        return AiResult(
+          reply: parsed['reply']?.toString() ?? text,
+          action: parsed['action'] as Map<String, dynamic>?,
+        );
+      } catch (_) {
+        // Model didn't return clean JSON this time - show the raw text, no action.
+        return AiResult(reply: text);
+      }
+    } catch (_) {
+      return AiResult(reply: 'Something went wrong. Check your internet connection and try again.');
+    }
+  }
+
+  /// Plain text in, plain text out - used for "Summarize this note".
+  Future<String> summarizeText({required String apiKey, required String text}) async {
+    if (apiKey.trim().isEmpty) return 'Add your Gemini API key in Settings first.';
+    final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey');
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'role': 'user',
+              'parts': [
+                {'text': 'Summarize the following note in 2-3 short sentences, plain text only, no markdown:\n\n$text'}
+              ]
+            }
+          ],
+        }),
+      );
+      if (response.statusCode != 200) return 'Could not summarize (error ${response.statusCode}).';
+      final body = jsonDecode(response.body);
+      final result = _extractText(body);
+      return result?.trim() ?? 'Could not summarize this note.';
+    } catch (_) {
+      return 'Check your internet connection and try again.';
+    }
+  }
+
+  /// Extracts candidate action-item tasks from a note's text.
+  Future<List<String>> extractTasks({required String apiKey, required String text}) async {
+    if (apiKey.trim().isEmpty) return [];
+    final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey');
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'role': 'user',
+              'parts': [
+                {'text': 'Extract any clear action items / to-dos from this note as a short JSON array of strings (just the array, nothing else, no markdown fences). If there are none, return []. Note:\n\n$text'}
+              ]
+            }
+          ],
+          'generationConfig': {'responseMimeType': 'application/json'},
+        }),
+      );
+      if (response.statusCode != 200) return [];
+      final body = jsonDecode(response.body);
+      final result = _extractText(body);
+      if (result == null) return [];
+      final parsed = jsonDecode(result);
+      if (parsed is List) return parsed.map((e) => e.toString()).toList();
+      return [];
+    } catch (_) {
+      return [];
+    }
   }
 }
