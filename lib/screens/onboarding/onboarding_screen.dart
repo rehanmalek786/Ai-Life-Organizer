@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
@@ -20,6 +21,10 @@ const _questions = [
 /// Shown once, right after a new account is created (see main.dart). Every
 /// question is skippable - answers are saved as Memory entries so the AI
 /// Assistant already knows them from the very first chat.
+///
+/// Every network call here is wrapped so a failure (or a slow connection)
+/// can NEVER leave the screen stuck on a spinner - onboarding always
+/// continues even if saving a particular answer didn't succeed.
 class OnboardingScreen extends StatefulWidget {
   final VoidCallback onDone;
   const OnboardingScreen({super.key, required this.onDone});
@@ -33,13 +38,28 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   int _step = 0;
   bool _busy = false;
 
+  Future<void> _markLocalDone() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('onboarding_done_${user.uid}', true);
+    } catch (_) {}
+  }
+
   Future<void> _answer(String option) async {
     setState(() => _busy = true);
     final q = _questions[_step];
-    await _fs.addMemory('${q.memoryPrefix} $option'.toLowerCase().replaceFirstMapped(RegExp('^.'), (m) => m[0]!.toUpperCase()));
-    if (_step == _questions.length - 1) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('default_reminder_sound', option == 'Loud alarm' ? 'alarm' : 'notification');
+    try {
+      final text = '${q.memoryPrefix} $option';
+      await _fs.addMemory(text[0].toUpperCase() + text.substring(1)).timeout(const Duration(seconds: 8));
+      if (_step == _questions.length - 1) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('default_reminder_sound', option == 'Loud alarm' ? 'alarm' : 'notification');
+      }
+    } catch (_) {
+      // Saving the memory failed or timed out - don't block the user's
+      // progress over it, just move on.
     }
     if (!mounted) return;
     setState(() => _busy = false);
@@ -55,7 +75,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _finish() async {
-    await _fs.markOnboardingComplete();
+    setState(() => _busy = true);
+    try {
+      await _fs.markOnboardingComplete().timeout(const Duration(seconds: 8));
+    } catch (_) {
+      // Even if this write fails, still let the user into the app -
+      // they'll just see onboarding again next time, which is harmless.
+    }
+    await _markLocalDone();
+    if (!mounted) return;
     widget.onDone();
   }
 
@@ -96,7 +124,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Text('This helps the AI Assistant understand you from the start - skip anytime.', style: theme.textTheme.bodySmall),
             const SizedBox(height: 28),
             if (_busy)
-              const Center(child: Padding(padding: EdgeInsets.only(top: 40), child: CircularProgressIndicator()))
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 40),
+                  child: Column(
+                    children: [
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: 16),
+                      TextButton(
+                        onPressed: () {
+                          // Manual safety valve - if this ever takes too
+                          // long, the user is never truly stuck.
+                          setState(() => _busy = false);
+                          _next();
+                        },
+                        child: const Text('Taking too long? Tap to continue'),
+                      ),
+                    ],
+                  ),
+                ),
+              )
             else
               ...q.options.map((opt) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -118,4 +165,3 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 }
-
