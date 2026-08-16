@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../providers/app_providers.dart';
 import '../../services/firestore_service.dart';
@@ -289,6 +289,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: const Icon(Icons.notifications_active_outlined, size: 18),
                     label: const Text('Send test notification'),
                   ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final ok = await _notif.scheduleReminder(
+                        id: 888887,
+                        title: 'Scheduled test reminder',
+                        dateTime: DateTime.now().add(const Duration(seconds: 10)),
+                      );
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(ok
+                              ? 'Scheduled - keep the screen off/app closed and wait 10 seconds.'
+                              : 'Could not schedule at all - this points to a permission problem.')),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.timer_outlined, size: 18),
+                    label: const Text('Schedule test reminder in 10 seconds'),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'This tests actual scheduling (not an instant notification). If the instant test above works but this one never arrives after 10 seconds, your phone\'s battery settings are blocking it - see note below.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: AppColors.priorityMedium.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.battery_alert_outlined, size: 18, color: AppColors.priorityMedium),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'On some phones (Xiaomi/Redmi, Oppo, Vivo, Realme especially), Android battery-saving kills scheduled reminders unless you allow it manually: Phone Settings -> Apps -> AI Life Organizer -> Battery -> set to "Unrestricted" / "No restrictions".',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -328,4 +372,3 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 }
-
