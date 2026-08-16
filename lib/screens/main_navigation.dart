@@ -14,6 +14,8 @@ import 'search/search_screen.dart';
 import 'location/location_reminders_screen.dart';
 import 'vault/vault_screen.dart';
 import '../services/location_service.dart';
+import '../widgets/shared_widgets.dart';
+import '../theme/app_theme.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
@@ -81,15 +83,15 @@ class _MoreScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = [
       (Icons.search, 'Search', const SearchScreen()),
-      (Icons.sticky_note_2_outlined, 'Notes', const NotesScreen()),
-      (Icons.flag_outlined, 'Goals', const GoalsScreen()),
-      (Icons.repeat_rounded, 'Habits', const HabitsScreen()),
-      (Icons.notifications_none, 'Reminders', const RemindersScreen()),
-      (Icons.account_balance_wallet_outlined, 'Money Organizer', const MoneyScreen()),
-      (Icons.bar_chart_rounded, 'Analytics', const AnalyticsScreen()),
-      (Icons.location_on_outlined, 'Location Reminders', const LocationRemindersScreen()),
-      (Icons.lock_outline, 'Personal Vault', const VaultScreen()),
-      (Icons.settings_outlined, 'Settings', const SettingsScreen()),
+      (Icons.sticky_note_2_outlined, 'Notes', const NotesScreen(), AppColors.priorityMedium),
+      (Icons.flag_outlined, 'Goals', const GoalsScreen(), AppColors.priorityLow),
+      (Icons.repeat_rounded, 'Habits', const HabitsScreen(), AppColors.accent),
+      (Icons.notifications_none, 'Reminders', const RemindersScreen(), AppColors.priorityHigh),
+      (Icons.account_balance_wallet_outlined, 'Money Organizer', const MoneyScreen(), AppColors.success),
+      (Icons.bar_chart_rounded, 'Analytics', const AnalyticsScreen(), AppColors.primary),
+      (Icons.location_on_outlined, 'Location Reminders', const LocationRemindersScreen(), AppColors.priorityLow),
+      (Icons.lock_outline, 'Personal Vault', const VaultScreen(), AppColors.priorityMedium),
+      (Icons.settings_outlined, 'Settings', const SettingsScreen(), AppColors.subtleLight),
     ];
     return Scaffold(
       appBar: AppBar(title: const Text('More')),
@@ -98,13 +100,18 @@ class _MoreScreen extends StatelessWidget {
         itemCount: items.length,
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (context, i) {
-          final (icon, label, screen) = items[i];
+          final (icon, label, screen, color) = items[i];
           return Card(
             child: ListTile(
-              leading: Icon(icon),
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(12)),
+                child: Icon(icon, color: color, size: 20),
+              ),
               title: Text(label),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => screen)),
+              onTap: () => Navigator.push(context, smoothRoute(screen)),
             ),
           );
         },
