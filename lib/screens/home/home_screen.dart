@@ -5,6 +5,7 @@ import '../../providers/app_providers.dart';
 import '../../services/firestore_service.dart';
 import '../../models/models.dart';
 import '../../widgets/shared_widgets.dart';
+import '../../theme/app_theme.dart';
 import '../money/money_screen.dart';
 import '../analytics/analytics_screen.dart';
 import '../search/search_screen.dart';
@@ -31,7 +32,7 @@ class HomeScreen extends StatelessWidget {
   ];
 
   void _push(BuildContext context, Widget screen) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+    Navigator.push(context, smoothRoute(screen));
   }
 
   @override
@@ -68,15 +69,15 @@ class HomeScreen extends StatelessWidget {
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 children: [
-                  _QuickAction(icon: Icons.account_balance_wallet_outlined, label: 'Money', onTap: () => _push(context, const MoneyScreen())),
+                  _QuickAction(icon: Icons.account_balance_wallet_outlined, label: 'Money', color: AppColors.success, onTap: () => _push(context, const MoneyScreen())),
                   const SizedBox(width: 10),
-                  _QuickAction(icon: Icons.bar_chart_rounded, label: 'Analytics', onTap: () => _push(context, const AnalyticsScreen())),
+                  _QuickAction(icon: Icons.bar_chart_rounded, label: 'Analytics', color: AppColors.priorityLow, onTap: () => _push(context, const AnalyticsScreen())),
                   const SizedBox(width: 10),
-                  _QuickAction(icon: Icons.repeat_rounded, label: 'Habits', onTap: () => _push(context, const HabitsScreen())),
+                  _QuickAction(icon: Icons.repeat_rounded, label: 'Habits', color: AppColors.accent, onTap: () => _push(context, const HabitsScreen())),
                   const SizedBox(width: 10),
-                  _QuickAction(icon: Icons.lock_outline, label: 'Vault', onTap: () => _push(context, const VaultScreen())),
+                  _QuickAction(icon: Icons.lock_outline, label: 'Vault', color: AppColors.priorityMedium, onTap: () => _push(context, const VaultScreen())),
                   const SizedBox(width: 10),
-                  _QuickAction(icon: Icons.auto_awesome, label: 'AI Chat', onTap: () => onNavigate(3)),
+                  _QuickAction(icon: Icons.auto_awesome, label: 'AI Chat', color: AppColors.primary, onTap: () => onNavigate(3)),
                 ],
               ),
             ),
@@ -200,23 +201,29 @@ class HomeScreen extends StatelessWidget {
 class _QuickAction extends StatelessWidget {
   final IconData icon;
   final String label;
+  final Color color;
   final VoidCallback onTap;
-  const _QuickAction({required this.icon, required this.label, required this.onTap});
+  const _QuickAction({required this.icon, required this.label, required this.onTap, this.color = AppColors.primary});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return InkWell(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(18),
       onTap: onTap,
       child: Container(
-        width: 74,
-        decoration: BoxDecoration(color: theme.cardTheme.color, borderRadius: BorderRadius.circular(16)),
+        width: 76,
+        decoration: BoxDecoration(color: theme.cardTheme.color, borderRadius: BorderRadius.circular(18)),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: theme.colorScheme.primary),
-            const SizedBox(height: 6),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(13)),
+              child: Icon(icon, color: color, size: 21),
+            ),
+            const SizedBox(height: 8),
             Text(label, style: const TextStyle(fontSize: 11), textAlign: TextAlign.center),
           ],
         ),
