@@ -76,22 +76,30 @@ class _MainNavigationState extends State<MainNavigation> with WidgetsBindingObse
   }
 }
 
+class _MoreItem {
+  final IconData icon;
+  final String label;
+  final Widget screen;
+  final Color color;
+  const _MoreItem(this.icon, this.label, this.screen, this.color);
+}
+
 class _MoreScreen extends StatelessWidget {
   const _MoreScreen();
 
   @override
   Widget build(BuildContext context) {
     final items = [
-      (Icons.search, 'Search', const SearchScreen()),
-      (Icons.sticky_note_2_outlined, 'Notes', const NotesScreen(), AppColors.priorityMedium),
-      (Icons.flag_outlined, 'Goals', const GoalsScreen(), AppColors.priorityLow),
-      (Icons.repeat_rounded, 'Habits', const HabitsScreen(), AppColors.accent),
-      (Icons.notifications_none, 'Reminders', const RemindersScreen(), AppColors.priorityHigh),
-      (Icons.account_balance_wallet_outlined, 'Money Organizer', const MoneyScreen(), AppColors.success),
-      (Icons.bar_chart_rounded, 'Analytics', const AnalyticsScreen(), AppColors.primary),
-      (Icons.location_on_outlined, 'Location Reminders', const LocationRemindersScreen(), AppColors.priorityLow),
-      (Icons.lock_outline, 'Personal Vault', const VaultScreen(), AppColors.priorityMedium),
-      (Icons.settings_outlined, 'Settings', const SettingsScreen(), AppColors.subtleLight),
+      _MoreItem(Icons.search, 'Search', const SearchScreen(), AppColors.primary),
+      _MoreItem(Icons.sticky_note_2_outlined, 'Notes', const NotesScreen(), AppColors.priorityMedium),
+      _MoreItem(Icons.flag_outlined, 'Goals', const GoalsScreen(), AppColors.priorityLow),
+      _MoreItem(Icons.repeat_rounded, 'Habits', const HabitsScreen(), AppColors.accent),
+      _MoreItem(Icons.notifications_none, 'Reminders', const RemindersScreen(), AppColors.priorityHigh),
+      _MoreItem(Icons.account_balance_wallet_outlined, 'Money Organizer', const MoneyScreen(), AppColors.success),
+      _MoreItem(Icons.bar_chart_rounded, 'Analytics', const AnalyticsScreen(), AppColors.primary),
+      _MoreItem(Icons.location_on_outlined, 'Location Reminders', const LocationRemindersScreen(), AppColors.priorityLow),
+      _MoreItem(Icons.lock_outline, 'Personal Vault', const VaultScreen(), AppColors.priorityMedium),
+      _MoreItem(Icons.settings_outlined, 'Settings', const SettingsScreen(), AppColors.subtleLight),
     ];
     return Scaffold(
       appBar: AppBar(title: const Text('More')),
@@ -100,18 +108,18 @@ class _MoreScreen extends StatelessWidget {
         itemCount: items.length,
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (context, i) {
-          final (icon, label, screen, color) = items[i];
+          final item = items[i];
           return Card(
             child: ListTile(
               leading: Container(
                 width: 40,
                 height: 40,
-                decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(12)),
-                child: Icon(icon, color: color, size: 20),
+                decoration: BoxDecoration(color: item.color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(12)),
+                child: Icon(item.icon, color: item.color, size: 20),
               ),
-              title: Text(label),
+              title: Text(item.label),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(context, smoothRoute(screen)),
+              onTap: () => Navigator.push(context, smoothRoute(item.screen)),
             ),
           );
         },
