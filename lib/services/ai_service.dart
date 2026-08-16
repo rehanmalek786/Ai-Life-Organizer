@@ -25,7 +25,7 @@ class AiService {
   }) async {
     if (apiKey.trim().isEmpty) {
       return AiResult(
-        reply: "AI abhi set up nahi hai. Settings mein jaakar apni free Gemini API key add karein.",
+        reply: "AI Assistant is not set up yet. Go to Settings and add your free Gemini API key.",
       );
     }
 
@@ -33,13 +33,14 @@ class AiService {
     final memoryText = memories.isEmpty ? 'None yet.' : memories.map((m) => '- $m').join('\n');
 
     final systemPrompt = '''
-You are the assistant inside "AI Life Organizer", a personal productivity app. The user may write in English or Hinglish (Hindi+English mix). Reply in the same style/language they used, keep it short and natural.
+You are the assistant inside "AI Life Organizer", a personal productivity app.
+Reply in English by default. If the user writes in Hindi or Hinglish (Hindi+English mix), you may reply in that same style instead. Keep it short and natural either way.
 
 You MUST respond with ONLY valid JSON, no markdown fences, no extra commentary, in exactly this shape:
 {"reply": "short natural reply to show the user", "action": null}
 
 or, when the user is clearly asking you to create or save something:
-{"reply": "short natural reply confirming what you understood", "action": {"type": "<one of: create_task, create_reminder, create_event, create_note, create_goal, create_habit, remember>", "data": { ... }}}
+{"reply": "short natural reply confirming what you understood", "action": {"type": "<one of: create_task, create_reminder, create_event, create_note, create_goal, create_habit, create_transaction, remember>", "data": { ... }}}
 
 Field shapes per action type:
 create_task: {"title": string, "description": string, "priority": "low"|"medium"|"high", "deadline": ISO8601 string or null, "category": string}
@@ -48,6 +49,7 @@ create_event: {"title": string, "startTime": ISO8601 string, "endTime": ISO8601 
 create_note: {"title": string, "body": string, "tags": [string]}
 create_goal: {"title": string, "description": string, "targetDate": ISO8601 string or null}
 create_habit: {"name": string, "frequency": "daily" or comma list like "mon,wed,fri"}
+create_transaction: {"type": "income"|"expense", "amount": number, "category": string, "note": string}
 remember: {"content": string}
 
 Rules:
@@ -95,24 +97,29 @@ $memoryText
       );
 
       if (response.statusCode != 200) {
+        if (response.statusCode == 429) {
+          return AiResult(
+            reply: "The AI is getting too many requests right now (rate limit on the free tier). Wait about a minute and try again.",
+          );
+        }
+        if (response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 403) {
+          return AiResult(
+            reply: 'Your API key looks invalid or restricted (error ${response.statusCode}). Check it in Settings, or generate a fresh one at aistudio.google.com/apikey.',
+          );
+        }
         return AiResult(
-          reply: 'AI se connect nahi ho paaya (error ${response.statusCode}). Settings mein apni API key check karein.',
+          reply: 'Could not connect to the AI (error ${response.statusCode}). Try again in a moment.',
         );
       }
 
       final body = jsonDecode(response.body);
       final candidates = body['candidates'] as List?;
-      String? text;
-      if (candidates != null && candidates.isNotEmpty) {
-        final content = candidates[0]['content'];
-        final parts = content != null ? content['parts'] as List? : null;
-        if (parts != null && parts.isNotEmpty) {
-          text = parts[0]['text'] as String?;
-        }
-      }
+      final text = candidates != null && candidates.isNotEmpty
+          ? candidates[0]['content']?['parts']?[0]?['text'] as String?
+          : null;
 
       if (text == null || text.trim().isEmpty) {
-        return AiResult(reply: 'Maaf kijiye, samajh nahi paya. Dobara try karein.');
+        return AiResult(reply: 'Sorry, I did not understand that. Please try again.');
       }
 
       try {
@@ -126,113 +133,64 @@ $memoryText
         return AiResult(reply: text);
       }
     } catch (_) {
-      return AiResult(reply: 'Kuch gadbad hui. Internet connection check karein aur dobara try karein.');
+      return AiResult(reply: 'Something went wrong. Check your internet connection and try again.');
     }
   }
 
-  /// Summarizes a note's body into a few short sentences. Returns a plain
-  /// string (no action) - used by the "Summarize" button in Notes.
+  /// Plain text in, plain text out - used for "Summarize this note".
   Future<String> summarizeText({required String apiKey, required String text}) async {
-    if (apiKey.trim().isEmpty) {
-      return 'AI abhi set up nahi hai. Settings mein jaakar apni free Gemini API key add karein.';
-    }
-    if (text.trim().isEmpty) return '';
-
-    final prompt =
-        'Summarize the following note in 2-4 short sentences. Reply in the same '
-        'language/style as the note (English or Hinglish). Return ONLY the '
-        'summary text, no preamble, no markdown, no quotes.\n\nNote:\n$text';
-
+    if (apiKey.trim().isEmpty) return 'Add your Gemini API key in Settings first.';
+    final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey');
     try {
       final response = await http.post(
-        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey'),
+        url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'contents': [
             {
               'role': 'user',
               'parts': [
-                {'text': prompt}
-              ],
+                {'text': 'Summarize the following note in 2-3 short sentences, plain text only, no markdown:\n\n$text'}
+              ]
             }
           ],
         }),
       );
-
-      if (response.statusCode != 200) {
-        return 'AI se connect nahi ho paaya (error ${response.statusCode}). Settings mein apni API key check karein.';
-      }
-
+      if (response.statusCode != 200) return 'Could not summarize (error ${response.statusCode}).';
       final body = jsonDecode(response.body);
-      final candidates = body['candidates'] as List?;
-      String? text0;
-      if (candidates != null && candidates.isNotEmpty) {
-        final content = candidates[0]['content'];
-        final parts = content != null ? content['parts'] as List? : null;
-        if (parts != null && parts.isNotEmpty) {
-          text0 = parts[0]['text'] as String?;
-        }
-      }
-
-      if (text0 == null || text0.trim().isEmpty) {
-        return 'Maaf kijiye, samajh nahi paya. Dobara try karein.';
-      }
-      return text0.trim();
+      final result = body['candidates']?[0]?['content']?['parts']?[0]?['text'] as String?;
+      return result?.trim() ?? 'Could not summarize this note.';
     } catch (_) {
-      return 'Kuch gadbad hui. Internet connection check karein aur dobara try karein.';
+      return 'Check your internet connection and try again.';
     }
   }
 
-  /// Extracts candidate action-item task titles from a note's body.
-  /// Returns an empty list if nothing looks like an action item, or if
-  /// the request fails for any reason - callers treat empty as "none found".
+  /// Extracts candidate action-item tasks from a note's text.
   Future<List<String>> extractTasks({required String apiKey, required String text}) async {
-    if (apiKey.trim().isEmpty || text.trim().isEmpty) return [];
-
-    final prompt =
-        'Read the following note and extract any clear action items / to-dos '
-        'as short task titles. You MUST respond with ONLY a valid JSON array '
-        'of strings, no markdown fences, no extra commentary, e.g. '
-        '["Buy groceries", "Call the dentist"]. If there are no clear action '
-        'items, respond with exactly [].\n\nNote:\n$text';
-
+    if (apiKey.trim().isEmpty) return [];
+    final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey');
     try {
       final response = await http.post(
-        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey'),
+        url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'contents': [
             {
               'role': 'user',
               'parts': [
-                {'text': prompt}
-              ],
+                {'text': 'Extract any clear action items / to-dos from this note as a short JSON array of strings (just the array, nothing else, no markdown fences). If there are none, return []. Note:\n\n$text'}
+              ]
             }
           ],
-          'generationConfig': {
-            'responseMimeType': 'application/json',
-          },
+          'generationConfig': {'responseMimeType': 'application/json'},
         }),
       );
-
       if (response.statusCode != 200) return [];
-
       final body = jsonDecode(response.body);
-      final candidates = body['candidates'] as List?;
-      String? text0;
-      if (candidates != null && candidates.isNotEmpty) {
-        final content = candidates[0]['content'];
-        final parts = content != null ? content['parts'] as List? : null;
-        if (parts != null && parts.isNotEmpty) {
-          text0 = parts[0]['text'] as String?;
-        }
-      }
-      if (text0 == null || text0.trim().isEmpty) return [];
-
-      final parsed = jsonDecode(text0);
-      if (parsed is List) {
-        return parsed.map((e) => e.toString()).where((s) => s.trim().isNotEmpty).toList();
-      }
+      final result = body['candidates']?[0]?['content']?['parts']?[0]?['text'] as String?;
+      if (result == null) return [];
+      final parsed = jsonDecode(result);
+      if (parsed is List) return parsed.map((e) => e.toString()).toList();
       return [];
     } catch (_) {
       return [];
